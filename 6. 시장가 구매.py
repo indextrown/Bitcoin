@@ -1,4 +1,6 @@
-# */1 * * * *   1분마다 호출
+# */1 * * * *      1분마다 호출
+#  0 */12 * * *   12시간마다 호출
+
 import pyupbit
 import time
 from dotenv import load_dotenv

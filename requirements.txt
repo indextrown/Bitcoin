@@ -1,2 +1,9 @@
+# source .venv/bin/activate  # 가상 환경 활성화
+# pip install -r requirements.txt
+
+# 비트코인 자동매매
 pyupbit
 dotenv
+
+# 비트코인 백테스팅
+matplotlib

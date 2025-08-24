@@ -32,4 +32,7 @@ df = pyupbit.get_ohlcv("KRW-BTC", interval="minute240")
 # 이전 240분봉의(4시간 전) RSI
 # print(getRSI(df).iloc[-2])  
 
+# 240분봉의 RSI(실시간 지표) 기준으로 30 이하면 매수 로직
 rsi14 = float(getRSI(df ,14).iloc[-1])  # 실시간 240분봉의 RSI
+if rsi14 < 30:
+    upbit.buy_market_order("KRW-BTC", 5000)
