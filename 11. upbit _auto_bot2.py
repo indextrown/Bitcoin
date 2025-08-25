@@ -4,6 +4,30 @@
 - 10분마다 실행한다면 6번의 분할 매수를 진행하는 봇을 만들 수 있다.
 https://class101.net/ko/classes/60dab8da41daac0014f1d4fa/lectures/60e1101c75584b000d39dd55
 https://class101.net/ko/classes/60dab8da41daac0014f1d4fa/lectures/60e1102b761d260014350331
+
+
+
+- 처음 매수할 코인
+    [매수]
+    - if  `이전 RSI 지표가 30 이하이고 현재 RSI 지표가 30 초과`이면서 MAXCOINCNT가 5 보다 작다면
+        - firstEnterMoney 만큼매수(BUY-NEW)
+    
+- 이미 매수한 코인(물타기)
+    [매수]
+    - if `이전 RSI 지표가 30 이하이고 현재 RSI 지표가 30 초과라면`
+        - if 해당 코인에 할당된 최대 금액의 절반까지는
+            - waterEnterMoney로 물타기(BUY-WATER-1)
+        - else (해당 코인에 할당된 최대 금액 50%초과시) && 수익률이  -5% 이하일때(원금 소진을 늦추기 위함)
+            - waterEnterMoney로 물타기(BUY-WATER-2)
+    
+    [매도]
+    - if `현재 RSI 지표가 70 이상이면서 수익률이 1% 이상이면`
+        - if 현재 코인의 매수금액이 최대 매수금액이 25% 미만이면 전체를 시장가 매도(SELL-PROFIT-ALL)
+        - else 현재 코인의 매수금액이 최대 매수금액의 25% 이상이면 절반씩 시장가 매도(SELL-PROFIT-HALF)
+    
+    [매도2]
+    - if 내가 가진 원금이 물탈돈보다 없으면서 수익률이 -10% 이하라면
+        - 해당 코인을 절반 매도(손절)(SELL-LOSS-HALF)
 '''
 
 import pyupbit
@@ -224,7 +248,7 @@ def getTotalRealMoney(balances):
 
     return total
 
-def getTotalRealMoney_Save(balances):
+def getTotalRealMoney_save(balances):
     total = 0.0
     for value in balances:
 
@@ -242,7 +266,7 @@ def getTotalRealMoney_Save(balances):
                     nowPrice = pyupbit.get_current_price(realTicker)
                     total += (float(nowPrice) * (float(value['balance']) + float(value['locked'])))
         except Exception as e:
-            print("getTotalRealMoney error:", e)
+            print("GetTotalRealMoney error:", e)
 
 
     return total
@@ -269,7 +293,7 @@ print("Top 10 coins by trading volume: ", top10_coin_list)
 danger_coin_list = ['KRW-MANA', 'KRW-LOOM', 'KRW-ANKR']
 
 # 내가 희망하는 코인 리스트
-lovely_coin_list = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+# lovely_coin_list = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
 
 # 잔고 데이터 받아오기
 balances = upbit.get_balances()
@@ -292,20 +316,18 @@ firstEnterMoney = coinMaxMoney / 100.0 * FIRSTRATE
 waterEnterMoney = coinMaxMoney / 100.0 * WATERRATE    
 
 print("---------------------------------")
-print("총 원금(=코인 매수 원가 + 보유 KRW): ", totalMoney)
-print("총 평가금(=총 보유자산): ", totalRealMoney)
+print("총 투자 원금(=코인 매수 원가 + 보유 KRW): ", totalMoney)
+print("현재 평가금(=총 보유자산): ", totalRealMoney)
 print("총 자산 수익률: ", totalRevenue)
 print("---------------------------------")
-print("최대 매수 금액: ", coinMaxMoney)
-print("첫 진입 금액: ", firstEnterMoney)
-print("두번째 진입 금액: ", waterEnterMoney)
-print("---------------------------------")
+print("코인당 최대 매수 금액: ", coinMaxMoney)
+print("첫 매수할 금액: ", firstEnterMoney)
+print("추가매수(물타기) 금액: ", waterEnterMoney)
+print("---------------------------------\n\n\n")
 
-
-
+ 
 for ticker in top10_coin_list:
     try:
-
         # if checkCoinInList(lovely_coin_list, ticker) == False:
         #     # 내가 희망하는 코인에 없으면 패스
         #     continue
@@ -324,56 +346,167 @@ for ticker in top10_coin_list:
         df_60 = pyupbit.get_ohlcv(ticker, "minute60")
         rsi_60_before = getRSI(df_60, 14, -2)
         rsi_60 = getRSI(df_60, 14, -1)
-        print(f"ticker: {ticker}, RSI: {rsi_60_before} -> {rsi_60}")
-        print(ticker)
-        # time.sleep(0.05)
+        # print(f"ticker: {ticker}, RSI: {rsi_60_before} -> {rsi_60}")
 
+        # 수익률 구하기
         revenue_rate = getRevenueRate(balances, ticker)
-        print("revenue_rate: ", revenue_rate)
+        # print("revenue_rate: ", revenue_rate)
 
+        # 원화 잔고를 가져온다
+        won = float(upbit.get_balance("KRW"))
+        print("---------------------------------")
+        print(ticker)
+        print("최근 RSI 지표 추이: ", rsi_60_before, " -> ", rsi_60)
+        print("수익률: ", revenue_rate)
+        print("현재 남은 돈(원화): ", won)
+
+
+        # ==========================
         # 이미 매수된 코인
+        # ==========================
         # - 추가매수(물타기)
         if isHasCoin(balances, ticker) == True:
-            if rsi_60 <= 30.0: 
 
-                # 매수된 코인의 총량
-                nowCoinTotalMoney = getCoinNowMoney(balances, ticker)
+            
+            # ==========================
+            # [매도]
+            # ==========================
+            # 현재 코인의 총 매수금액
+            nowCoinTotalMoney = getCoinNowMoney(balances, ticker) 
 
-                # 비중 = 현재까지 매수된 금액 / 한 코인이 할당되는 최대금액 * 100
-                totalRate = nowCoinTotalMoney / coinMaxMoney * 100.0
+            # rsi60이 70 이상이면서 수익률이 1% 이상이면 분할 매도 진행
+            if rsi_60 >= 70 and revenue_rate >= 1.0:
+
+                # 현재 코인의 매수금액이 최대 매수금액의 25% 미만 라면 전체를 시장가 매도
+                if nowCoinTotalMoney < (coinMaxMoney / 4.0):
+                    # print("[이미 매수된 코인 - 매도1-1]")
+                    sellPrice = upbit.get_balance(ticker)
+                    # print(upbit.sell_market_order(ticker, sellPrice))
+                    message = f"""
+                    ✅ 매도 완료 | 유형: SELL-PROFIT-ALL
+                    - 정보: 전체 시장가 매도
+                    - 코인: {ticker}
+                    - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
+                    - 수익률: {revenue_rate:.2f}%
+                    - 매도가격: {sellPrice:.4f}
+                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
+                    """
+                    print(message)
+                    
+                # 현재 코인의 매수금액이 최대 매수금액의 25% 이상이면 절반씩 시장가 매도
+                else:
+                    # print("[이미 매수된 코인 - 매도1-2]")
+                    sellPrice = upbit.get_balance(ticker)
+                    # print(upbit.sell_market_order(ticker, sellPrice / 2.0))
+                    message = f"""
+                    ✅ 매도 완료 | 유형: SELL-PROFIT-HALF
+                    - 정보: 절반씩 시장가 매도
+                    - 코인: {ticker}
+                    - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
+                    - 수익률: {revenue_rate:.2f}%
+                    - 매도가격: {sellPrice:.4f}
+                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
+                    """
+                    print(message)
+
+                
+                time.sleep(0.05)
+                # 원화 잔고 업데이트
+                won = float(upbit.get_balance("KRW"))
+
+            # 비중 = 현재까지 매수된 금액 / 한 코인이 할당되는 최대금액 * 100
+            # 즉 해당 코인에 할당된 최대 금액 기준으로 얼마나 매수했는가
+            totalRate = nowCoinTotalMoney / coinMaxMoney * 100.0
+
+
+            # ==========================
+            # [매도2 - 원금 확보]
+            # ==========================
+            # 내가 가진 원금이 물탈돈보다 없고 수익률이 -10% 이하라면 해당 코인을 절반 매도(손절로직)
+            if won < waterEnterMoney and revenue_rate < -10.0:
+                # print("[이미 매수된 코인 - 매도2] 원화 바닥 해당 코인 절반 매도합니다")
+                sellPrice = upbit.get_balance(ticker) / 2.0
+                # print(upbit.sell_market_order(ticker, sellPrice))
+                message = f"""
+                ⚠️ 매도 실행 | 유형: SELL-LOSS-HALF
+                - 정보: 원화 잔고 부족 & 수익률 -10% 이하 손절
+                - 코인: {ticker}
+                - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
+                - 수익률: {revenue_rate:.2f}%
+                - 매도수량: {sellPrice:.4f}
+                - 매도금액(KRW): {pyupbit.get_current_price(ticker) * sellPrice:,.0f}원
+                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}
+                """
+                print(message)
+
+
+
+
+            # ==========================
+            # [매수]
+            # ==========================
+            # 60분봉 기준 RSI 지표 30 이하에서 빠져나왔을 떄 
+            if rsi_60_before <= 30.0 and  rsi_60 > 30.0:
 
                 # 총 원금에서 절반까지 다다를떄까지만 이렇게 물타기를 한다
-                if totalRate > 50.0:
-                    print(upbit.buy_market_order(ticker, waterEnterMoney))
+                if totalRate <= 50.0:
+                    # print("[이미 매수된 코인 - 매수1-1]")
+                    # print(upbit.buy_market_order(ticker, waterEnterMoney))
+                    message = f"""
+                    ✅ 매수 실행 | 유형: BUY-WATER-1
+                    - 정보: {waterEnterMoney}원 물타기
+                    - 코인: {ticker}
+                    - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
+                    - 매수금액: {waterEnterMoney:,.0f} KRW
+                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
+                    """
+                    print(message)
+                    
 
-                # 50프로 초과하면
+
+                # 50% 초과하면
                 else:
                     # 수익율이 마이너스 5% 이하일때만 매수를 진행하여 원금 소진을 늦춘다
                     if revenue_rate <= -5.0:
-                        print(upbit.buy_market_order(ticker, waterEnterMoney))
+                        # print("[이미 매수된 코인 - 매수1-2]")
+                        # print(upbit.buy_market_order(ticker, waterEnterMoney))
+                        message = f"""
+                        ✅ 매수 실행 | 유형: BUY-WATER-2
+                        - 정보: {waterEnterMoney}원 물타기
+                        - 코인: {ticker}
+                        - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
+                        - 매수금액: {waterEnterMoney:,.0f} KRW
+                        - 조건: 50% 이상 & 수익률 -5% 이하
+                        - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
+                        """
+                        print(message)
 
 
+
+
+
+
+
+
+        # ==========================
         # 아직 매수안한 코인
+        # ==========================
         # - 첫 매수
         else:
-            # rei 30 이하이면서 코인이 5개 이하라면 매수
-            if rsi_60 <= 30.0 and getHasCoinCnt(balances) < MAXCOINCNT:
-                print(upbit.buy_market_order(ticker, firstEnterMoney))
-
-
-
-
-
-        # [매수]
-        # rsi30이하이면서 수익율 -5% 이하이면 매수
-        # if rsi_60 <= 30.0 and revenue_rate <= -5.0:
-
-
-
-        
-
-
-
+            # [전략 2]
+            # 이전 RSI 지표가 30 이하이고 지금 RSI 지표가 30 초과이일 때 매수
+            if rsi_60_before <= 30.0 and rsi_60 > 30.0 and getHasCoinCnt(balances) < MAXCOINCNT:
+                # print("[첫 매수]")
+                # print(upbit.buy_market_order(ticker, firstEnterMoney))
+                message = f"""
+                ✅ 매수 실행 | 유형: BUY-NEW
+                - 정뵈 코인 첫 매수
+                - 코인: {ticker}
+                - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
+                - 매수금액: {firstEnterMoney:,.0f} KRW
+                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
+                """
+                print(message)
 
 
     except Exception as e:
