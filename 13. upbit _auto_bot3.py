@@ -378,7 +378,7 @@ WATERRATE = 5.0
 # tickers = pyupbit.get_tickers("KRW")
 
 # 거래대금 상위 10개 코인 리스트 가져오기
-top10_coin_list = getTopCoinList("day", 30)
+top10_coin_list = getTopCoinList("day", 10)
 print("Top 10 coins by trading volume: ", top10_coin_list)
 
 # 위험한 코인 리스트
@@ -429,30 +429,7 @@ for ticker in top10_coin_list:
         balances = upbit.get_balances()
         time.sleep(0.05)
 
-        # 거래대금 상위 10개 코인에 없으면 패스
-        if checkCoinInList(top10_coin_list, ticker) == False:
-            continue
 
-        # 위험한 코인에 있으면 패스
-        if checkCoinInList(danger_coin_list, ticker) == True:
-            continue
-
-        
-        # 60분봉 정보 가져오기
-        df_60 = pyupbit.get_ohlcv(ticker, "minute60")
-        rsi_60_before = getRSI(df_60, 14, -3)
-        rsi_60 = getRSI(df_60, 14, -2)
-
-        # 수익률 구하기
-        revenue_rate = getRevenueRate(balances, ticker)
-
-        # 원화 잔고를 가져온다
-        won = float(upbit.get_balance("KRW"))
-        print("---------------------------------")
-        print(ticker)
-        print("최근 RSI 지표 추이: ", rsi_60_before, " -> ", rsi_60)
-        print("수익률: ", revenue_rate)
-        print("현재 남은 돈(원화): ", won)
 
 
         # ==========================
@@ -460,6 +437,35 @@ for ticker in top10_coin_list:
         # ==========================
         # - 추가매수(물타기)
         if isHasCoin(balances, ticker) == True:
+
+            # 위험한 코인에 있으면 패스
+            if checkCoinInList(danger_coin_list, ticker) == True:
+                continue
+
+            
+            # 60분봉 정보 가져오기
+            df_60 = pyupbit.get_ohlcv(ticker, "minute60")
+            rsi_60_before = getRSI(df_60, 14, -3)
+            rsi_60 = getRSI(df_60, 14, -2)
+
+            # 수익률 구하기
+            revenue_rate = getRevenueRate(balances, ticker)
+
+            # 원화 잔고를 가져온다
+            won = float(upbit.get_balance("KRW"))
+            print("---------------------------------")
+            print(ticker)
+            print("최근 RSI 지표 추이: ", rsi_60_before, " -> ", rsi_60)
+            print("수익률: ", revenue_rate)
+            print("현재 남은 돈(원화): ", won)
+
+
+
+
+
+
+
+
 
             
             # ==========================
@@ -595,18 +601,34 @@ for ticker in top10_coin_list:
                         """)
                         print(message)
 
-
-
-
-
-
-
-
         # ==========================
         # 아직 매수안한 코인
         # ==========================
         # - 첫 매수
         else:
+
+            # 거래대금 상위 10개 코인에 없으면 패스
+            if checkCoinInList(top10_coin_list, ticker) == False:
+                continue
+
+            # 위험한 코인에 있으면 패스
+            if checkCoinInList(danger_coin_list, ticker) == True:
+                continue
+
+            
+            # 60분봉 정보 가져오기
+            df_60 = pyupbit.get_ohlcv(ticker, "minute60")
+            rsi_60_before = getRSI(df_60, 14, -3)
+            rsi_60 = getRSI(df_60, 14, -2)
+
+            print("---------------------------------")
+            print(ticker)
+            print("최근 RSI 지표 추이: ", rsi_60_before, " -> ", rsi_60)
+ 
+
+                
+
+
             # 이전 RSI 지표가 30 이하이고 지금 RSI 지표가 30 초과이일 때 매수
             if rsi_60_before <= 30.0 and rsi_60 > 30.0 and getHasCoinCnt(balances) < MAXCOINCNT:
                 # print("[첫 매수]")
@@ -621,6 +643,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                 """)
                 print(message)
+
 
 
 
@@ -644,7 +667,7 @@ for ticker in top10_coin_list:
             print("ma5: ", ma5, "<- ", ma5_before2, "<- ", ma5_before3)
 
             # 5일선이 20일선 밑에 있을 때 5일선이 상승 추세로 꺾이면 매수를 진행하겠다
-            if ma5 < ma20 and ma5_before3 > ma5_before2 and ma5_before2 < ma5:
+            if ma5 < ma20 and ma5_before3 > ma5_before2 and ma5_before2 < ma5 and getHasCoinCnt(balances) < MAXCOINCNT:
                 # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 balances = buyCoinMarket(upbit, ticker, firstEnterMoney)
                 message = textwrap.dedent(f"""\
@@ -670,6 +693,7 @@ for ticker in top10_coin_list:
 
                 # 지정가매도
                 # upbit.sell_limit_order(ticker, pyupbit.get_tick_size(avgPrice), coinVolume)
+                sellCoinLimit(upbit, ticker, avgPrice, coinVolume)
 
 
 
@@ -681,7 +705,7 @@ for ticker in top10_coin_list:
             df_1 = pyupbit.get_ohlcv(ticker, "minute1")
             rsi_1 = getRSI(df_1, 14, -1)
 
-            if rsi_1 < 30.0:
+            if rsi_1 < 30.0 and getHasCoinCnt(balances) < MAXCOINCNT:
                 # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 message = textwrap.dedent(f"""\
                 ✅ 매수 실행 | 유형: BUY-NEW2
