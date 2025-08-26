@@ -8,7 +8,7 @@
 # 실시간 잔고 조회 (KRW, BTC, 평균단가)
 #      ↓
 # [조건 검사]
-#   └─ RSI ≤ 30  → 매수 실행
+#   └─ RSI ≤ 30  → 매수 실행(20프로씩)
 #   └─ RSI ≥ 70
 #        └─ 손실/본전 → 전량 매도
 #        └─ 수익 ≥ 25% → 절반 매도
@@ -25,6 +25,7 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import textwrap
 
 # ==========================
 # 🔧 설정값
@@ -121,15 +122,16 @@ def main():
         if invest_amount >= MIN_TRADE:
             try:
                 result = upbit.buy_market_order(TICKER, invest_amount)
-                msg = f"""
-[매수 성공]
-- 기준 봉: {candle_time} ~ {candle_end_time}
-- 기준 RSI: {rsi:.2f}
-- 이전 봉 RSI: {prev_rsi:.2f}
-- 현재가: {price:,.0f}원
-- 매수 금액: {invest_amount:,.0f}원
-- 주문 결과: {result}
-"""
+                msg = textwrap.dedent(f"""
+                [매수 성공]
+                - 기준 봉: {candle_time} ~ {candle_end_time}
+                - 기준 RSI: {rsi:.2f}
+                - 이전 봉 RSI: {prev_rsi:.2f}
+                - 현재가: {price:,.0f}원
+                - 매수 금액: {invest_amount:,.0f}원
+                - 주문 결과: {result}
+                - 실행 시각: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                """)
                 print(msg)
                 send_gmail("[매수 성공]", msg)
             except Exception as e:
@@ -144,14 +146,15 @@ def main():
         if profit_rate <= 0:
             try:
                 result = upbit.sell_market_order(TICKER, btc)
-                msg = f"""
-[전량 매도]
-- 기준 봉: {candle_time} ~ {candle_end_time}
-- 기준 RSI: {rsi:.2f}
-- 수익률: {profit_rate:.2f}%
-- 매도 금액: {hold_value:,.0f}원
-- 주문 결과: {result}
-"""
+                msg = textwrap.dedent(f"""
+                [전량 매도]
+                - 기준 봉: {candle_time} ~ {candle_end_time}
+                - 기준 RSI: {rsi:.2f}
+                - 수익률: {profit_rate:.2f}%
+                - 매도 금액: {hold_value:,.0f}원
+                - 주문 결과: {result}
+                - 실행 시각: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                """)
                 print(msg)
                 send_gmail("[전량 매도]", msg)
             except Exception as e:
@@ -164,27 +167,29 @@ def main():
             if value >= MIN_TRADE:
                 try:
                     result = upbit.sell_market_order(TICKER, half)
-                    msg = f"""
-[절반 매도 (익절)]
-- 기준 봉: {candle_time} ~ {candle_end_time}
-- 기준 RSI: {rsi:.2f}
-- 수익률: {profit_rate:.2f}%
-- 매도 금액: {value:,.0f}원
-- 남은 BTC: {btc - half:.6f}
-- 주문 결과: {result}
-"""
+                    msg = textwrap.dedent(f"""
+                    [절반 매도 (익절)]
+                    - 기준 봉: {candle_time} ~ {candle_end_time}
+                    - 기준 RSI: {rsi:.2f}
+                    - 수익률: {profit_rate:.2f}%
+                    - 매도 금액: {value:,.0f}원
+                    - 남은 BTC: {btc - half:.6f}
+                    - 주문 결과: {result}
+                    - 실행 시각: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                    """)
                     print(msg)
                     send_gmail("[절반 매도]", msg)
                 except Exception as e:
                     send_gmail("[절반 매도 실패]", f"에러: {e}")
     else:
-        msg = f"""
-[매수 실패]
-- 기준 봉: {candle_time} ~ {candle_end_time}
-- 기준 RSI: {rsi:.2f}
-- 이전 봉 RSI: {prev_rsi:.2f}
-- 매수 조건 미충족: RSI 값이 {BUY_THRESHOLD} 초과
-"""
+        msg = textwrap.dedent(f"""
+        [매수 실패]
+        - 기준 봉: {candle_time} ~ {candle_end_time}
+        - 기준 RSI: {rsi:.2f}
+        - 이전 봉 RSI: {prev_rsi:.2f}
+        - 매수 조건 미충족: RSI 값이 {BUY_THRESHOLD} 초과
+        - 실행 시각: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        """)
         print(msg)
         # send_gmail("[매수 실패]", msg)
 
