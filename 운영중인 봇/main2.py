@@ -40,12 +40,82 @@ import os
 import pandas as pd
 import time
 import textwrap
+import math
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+GMAIL_ADDRESS = "indextrown@gmail.com"
+TO_EMAIL = "indextrown@gmail.com"
+
+#틱사이즈 보정!! pyupbit에 소수점 2번째까지 지원하는걸로 보여서 추가!
+def get_tick_size(price: float, method="floor") -> float:
+    import math
+
+    if method == "floor":
+        func = math.floor
+    elif method == "round":
+        func = round
+    else:
+        func = math.ceil
+
+    if price >= 2_000_000:
+        return func(price / 1000) * 1000
+    elif price >= 1_000_000:
+        return func(price / 1000) * 1000
+    elif price >= 500_000:
+        return func(price / 500) * 500
+    elif price >= 100_000:
+        return func(price / 100) * 100
+    elif price >= 50_000:
+        return func(price / 50) * 50
+    elif price >= 10_000:
+        return func(price / 10) * 10
+    elif price >= 5_000:
+        return func(price / 5) * 5
+    elif price >= 1_000:
+        return func(price / 1) * 1
+    elif price >= 100:
+        return func(price / 1) * 1
+    elif price >= 10:
+        return func(price / 0.1) / 10
+    elif price >= 1:
+        return func(price / 0.01) / 100
+    elif price >= 0.1:
+        return func(price / 0.001) / 1000
+    elif price >= 0.01:
+        return func(price / 0.0001) / 10000
+    elif price >= 0.001:
+        return func(price / 0.00001) / 100000
+    elif price >= 0.0001:
+        return func(price / 0.000001) / 1000000
+    elif price >= 0.00001:
+        return func(price / 0.0000001) / 10000000
+    else:
+        return func(price / 0.00000001) / 100000000
+
 
 # key 받아오기 및 업비트 객체 생성
 load_dotenv()
 ACCESS_KEY = os.getenv("ACCESS_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY") 
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD").replace(" ", "")
 upbit = pyupbit.Upbit(ACCESS_KEY, SECRET_KEY)
+
+def send_gmail(subject, body):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = GMAIL_ADDRESS
+        msg['To'] = TO_EMAIL
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        # print("✅ 메일 전송 완료")
+    except Exception as e:
+        print("❌ 메일 전송 실패:", e)
 
 # RSI 계산 함수
 # ohlcv: pandas DataFrame
@@ -78,7 +148,7 @@ def getMA(ohlcv, period, st):
 # top: 상위 몇 개 코인까지 가져올지 (기본값: 10)
 # return: 거래대금 상위 코인 리스트
 def getTopCoinList(interval, top):
-    print(f"================거래대금 기준 상위 {top}개 코인 조회 중...================")
+    # print(f"================거래대금 기준 상위 {top}개 코인 조회 중...================")
 
     # 거래대금이 큰 코인을 찾기 위해 정렬을 위한 딕셔너리
     dic_coin_money = dict()
@@ -130,19 +200,33 @@ def checkCoinInList(coinList, ticker):
 # return: 수익율
 def getRevenueRate(balances, ticker):
     revenue_rate = 0.0
-
-    # 잔고 데이터 받아오기
     for value in balances:
-        realTicker = value['unit_currency'] + '-' + value['currency']
-        if ticker == realTicker:
-            time.sleep(0.05)
+        try:
+            realTicker = value['unit_currency'] + "-" + value['currency']
+            if ticker == realTicker:
+                time.sleep(0.05)
+                nowPrice = pyupbit.get_current_price(realTicker)
+                revenue_rate = (float(nowPrice)- float(value['avg_buy_price'])) * 100.0 / float(value['avg_buy_price'])
+                break
 
-            # 현재 가격을 가져옵니다.
-            nowPrice = pyupbit.get_current_price(realTicker)
+        except Exception as e:
+            print("---:", e)
 
-            # 수익율을 구해서 넣어줍니다
-            revenue_rate = (nowPrice - float(value['avg_buy_price'])) * 100.0 / float(value['avg_buy_price'])
     return revenue_rate
+    # revenue_rate = 0.0
+
+    # # 잔고 데이터 받아오기
+    # for value in balances:
+    #     realTicker = value['unit_currency'] + '-' + value['currency']
+    #     if ticker == realTicker:
+    #         time.sleep(0.05)
+
+    #         # 현재 가격을 가져옵니다.
+    #         nowPrice = pyupbit.get_current_price(realTicker)
+
+    #         # 수익율을 구해서 넣어줍니다
+    #         revenue_rate = (nowPrice - float(value['avg_buy_price'])) * 100.0 / float(value['avg_buy_price'])
+    # return revenue_rate
 
 # 티커에 해당하는 코인을 보유하고 있는지 확인하는 함수
 # balances: 잔고 데이터
@@ -178,12 +262,26 @@ def getCoinNowMoney(balances,ticker):
 # balances: 잔고 데이터
 # return: 보유하고 있는 코인 개수
 def getHasCoinCnt(balances):
-    CoinCnt = 0
+    coinCnt = 0
     for value in balances:
         avg_buy_price = float(value['avg_buy_price'])
-        if avg_buy_price != 0: #원화, 드랍받은 코인(평균매입단가가 0이다) 제외!
-            CoinCnt += 1
-    return CoinCnt
+        ticker = value['unit_currency'] + "-" + value['currency']
+
+        # 1) 원화, 드랍받은 코인(평균매입단가가 0이다) 제외!
+        
+        if avg_buy_price == 0:
+            continue
+        # 2) 거래 지원 중단된 코인 제외(현재가 조회 불가 시)
+        try:
+            price = pyupbit.get_current_price(ticker)
+            if price is None:  
+                # print(f"⚠️ 거래 지원 중단된 코인 제외: {ticker}")
+                continue
+        except Exception as e:
+            # print(f"⚠️ {ticker} 가격 조회 실패 → 제외 ({e})")
+            continue
+        coinCnt += 1
+    return coinCnt
 
 # 티커에 해당하는 코인의 평균 매입단가를 리턴한다
 # balances: 잔고 데이터
@@ -328,7 +426,7 @@ def sellCoinMarket(upbit, ticker, volume):
 # return: 잔고 데이터
 def buyCoinLimit(upbit, ticker, price, volume):
     time.sleep(0.05)
-    print(upbit.buy_limit_order(ticker,pyupbit.get_tick_size(price), volume))
+    print(upbit.buy_limit_order(ticker,get_tick_size(price), volume))
 
 # 넘겨받은 가격과 수량으로 지정가 매도한다.
 # upbit: upbit 객체
@@ -338,7 +436,7 @@ def buyCoinLimit(upbit, ticker, price, volume):
 # return: 잔고 데이터
 def sellCoinLimit(upbit, ticker, price, volume):
     time.sleep(0.05)
-    print(upbit.sell_limit_order(ticker,pyupbit.get_tick_size(price), volume))
+    print(upbit.sell_limit_order(ticker,get_tick_size(price), volume))
 
 # 해당 코인에 걸어진 매수매도주문 모두를 취소한다.
 # upbit: upbit 객체
@@ -379,10 +477,10 @@ WATERRATE = 5.0
 
 # 거래대금 상위 10개 코인 리스트 가져오기
 top10_coin_list = getTopCoinList("day", 10)
-print("Top 10 coins by trading volume: ", top10_coin_list)
+# print("Top 10 coins by trading volume: ", top10_coin_list)
 
 # 위험한 코인 리스트
-danger_coin_list = ['KRW-MANA', 'KRW-LOOM', 'KRW-ANKR']
+danger_coin_list = ['KRW-MANA', 'KRW-LOOM', 'KRW-ANKR', 'KRW-BTC', 'KRW-GAS', 'KRW-ELF', 'KRW-MINA']
 
 # 내가 희망하는 코인 리스트
 # lovely_coin_list = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
@@ -407,15 +505,22 @@ firstEnterMoney = coinMaxMoney / 100.0 * FIRSTRATE
 # 그 이후 매수할 금액 5%(두번째 진입 부터 코인당 최대 매수 가능한 금액의 5%만)
 waterEnterMoney = coinMaxMoney / 100.0 * WATERRATE    
 
-print("---------------------------------")
-print("총 투자 원금(=코인 매수 원가 + 보유 KRW): ", totalMoney)
-print("현재 평가금(=총 보유자산): ", totalRealMoney)
-print("총 자산 수익률: ", totalRevenue)
-print("---------------------------------")
-print("코인당 최대 매수 금액: ", coinMaxMoney)
-print("첫 매수할 금액: ", firstEnterMoney)
-print("추가매수(물타기) 금액: ", waterEnterMoney)
-print("---------------------------------\n\n\n")
+# print("---------------------------------")
+# print("총 투자 원금(=코인 매수 원가 + 보유 KRW): ", totalMoney)
+# print("현재 평가금(=총 보유자산): ", totalRealMoney)
+# print("총 자산 수익률: ", totalRevenue)
+# print("---------------------------------")
+# print("코인당 최대 매수 금액: ", coinMaxMoney)
+# print("첫 매수할 금액: ", firstEnterMoney)
+# print("추가매수(물타기) 금액: ", waterEnterMoney)
+# print("---------------------------------")
+# # ✅ 현재 보유중인 코인 정보 추가
+# coinCnt = getHasCoinCnt(balances)
+# coinList = [value['unit_currency'] + "-" + value['currency'] 
+#             for value in balances if float(value['avg_buy_price']) != 0]
+# print("현재 보유 코인 수: ", coinCnt)
+# print("현재 보유 코인 목록: ", coinList)
+# print("---------------------------------\n\n\n")
 
  
 for ticker in top10_coin_list:
@@ -496,6 +601,8 @@ for ticker in top10_coin_list:
                     - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
                     """)
                     print(message)
+                    send_gmail("✅ 매도 완료", message)
+                    time.sleep(1)
                     
                 # 현재 코인의 매수금액이 최대 매수금액의 25% 이상이면 절반씩 시장가 매도
                 else:
@@ -513,6 +620,7 @@ for ticker in top10_coin_list:
                     - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
                     """)
                     print(message)
+                    send_gmail("✅ 매도 완료", message)
 
                 # 원화 잔고 업데이트
                 won = float(upbit.get_balance("KRW"))
@@ -538,7 +646,7 @@ for ticker in top10_coin_list:
 
                 
                 message = textwrap.dedent(f"""\
-                ⚠️ 매도 실행 | 유형: SELL-LOSS-HALF
+                ⚠️ 매도 완료 | 유형: SELL-LOSS-HALF
                 - 정보: 원화 잔고 부족 & 수익률 -10% 이하 손절
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
@@ -548,6 +656,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}
                 """)
                 print(message)
+                send_gmail("✅ 매도 완료", message)
 
 
             # ==========================
@@ -567,7 +676,7 @@ for ticker in top10_coin_list:
                     balances = buyCoinMarket(upbit, ticker, waterEnterMoney)
 
                     message = textwrap.dedent(f"""\
-                    ✅ 매수 실행 | 유형: BUY-WATER-1
+                    ✅ 매수 완료 | 유형: BUY-WATER-1
                     - 정보: {waterEnterMoney}원 물타기
                     - 코인: {ticker}
                     - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
@@ -575,6 +684,7 @@ for ticker in top10_coin_list:
                     - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                     """)
                     print(message)
+                    send_gmail("✅ 매수 완료", message)
                     
 
 
@@ -600,6 +710,7 @@ for ticker in top10_coin_list:
                         - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                         """)
                         print(message)
+                        send_gmail("✅ 매수 완료", message)
 
         # ==========================
         # 아직 매수안한 코인
@@ -630,12 +741,13 @@ for ticker in top10_coin_list:
 
 
             # 이전 RSI 지표가 30 이하이고 지금 RSI 지표가 30 초과이일 때 매수
+            # print(f"첫매수 보유 코인 테스트: {getHasCoinCnt(balances)}")
             if rsi_60_before <= 30.0 and rsi_60 > 30.0 and getHasCoinCnt(balances) < MAXCOINCNT:
                 # print("[첫 매수]")
                 # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 balances = buyCoinMarket(upbit, ticker, firstEnterMoney)
                 message = textwrap.dedent(f"""\
-                ✅ 매수 실행 | 유형: BUY-NEW
+                ✅ 매수 완료 | 유형: BUY-NEW
                 - 정뵈 코인 첫 매수
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
@@ -643,9 +755,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                 """)
                 print(message)
-
-
-
+                send_gmail("✅ 매수 완료", message)
 
 
             
@@ -671,7 +781,7 @@ for ticker in top10_coin_list:
                 # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 balances = buyCoinMarket(upbit, ticker, firstEnterMoney)
                 message = textwrap.dedent(f"""\
-                ✅ 매수 실행 | 유형: BUY-NEW2
+                ✅ 매수 완료 | 유형: BUY-NEW2
                 - 정보: 코인 첫 매수 상승장 단타
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
@@ -680,6 +790,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                 """)
                 print(message)
+                send_gmail("✅ 매수 완료", message)
                 time.sleep(5.0)
 
                 # 위에서 매수 후 바로 지정가 매도 거는 로직
@@ -732,10 +843,6 @@ for ticker in top10_coin_list:
                 # 지정가매도
                 # upbit.sell_limit_order(ticker, pyupbit.get_tick_size(avgPrice), coinVolume)
             '''
-
-    
-
-
 
     except Exception as e:
         print(f"error: {e}")

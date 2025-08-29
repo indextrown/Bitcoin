@@ -40,12 +40,35 @@ import os
 import pandas as pd
 import time
 import textwrap
+import math
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+GMAIL_ADDRESS = "indextrown@gmail.com"
+TO_EMAIL = "indextrown@gmail.com"
 
 # key 받아오기 및 업비트 객체 생성
 load_dotenv()
 ACCESS_KEY = os.getenv("ACCESS_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY") 
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD").replace(" ", "")
 upbit = pyupbit.Upbit(ACCESS_KEY, SECRET_KEY)
+
+def send_gmail(subject, body):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = GMAIL_ADDRESS
+        msg['To'] = TO_EMAIL
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        # print("✅ 메일 전송 완료")
+    except Exception as e:
+        print("❌ 메일 전송 실패:", e)
 
 # RSI 계산 함수
 # ohlcv: pandas DataFrame
@@ -78,7 +101,7 @@ def getMA(ohlcv, period, st):
 # top: 상위 몇 개 코인까지 가져올지 (기본값: 10)
 # return: 거래대금 상위 코인 리스트
 def getTopCoinList(interval, top):
-    print(f"================거래대금 기준 상위 {top}개 코인 조회 중...================")
+    # print(f"================거래대금 기준 상위 {top}개 코인 조회 중...================")
 
     # 거래대금이 큰 코인을 찾기 위해 정렬을 위한 딕셔너리
     dic_coin_money = dict()
@@ -379,10 +402,10 @@ WATERRATE = 5.0
 
 # 거래대금 상위 10개 코인 리스트 가져오기
 top10_coin_list = getTopCoinList("day", 10)
-print("Top 10 coins by trading volume: ", top10_coin_list)
+# print("Top 10 coins by trading volume: ", top10_coin_list)
 
 # 위험한 코인 리스트
-danger_coin_list = ['KRW-MANA', 'KRW-LOOM', 'KRW-ANKR']
+danger_coin_list = ['KRW-MANA', 'KRW-LOOM', 'KRW-ANKR', 'KRW-BTC']
 
 # 내가 희망하는 코인 리스트
 # lovely_coin_list = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
@@ -407,15 +430,15 @@ firstEnterMoney = coinMaxMoney / 100.0 * FIRSTRATE
 # 그 이후 매수할 금액 5%(두번째 진입 부터 코인당 최대 매수 가능한 금액의 5%만)
 waterEnterMoney = coinMaxMoney / 100.0 * WATERRATE    
 
-print("---------------------------------")
-print("총 투자 원금(=코인 매수 원가 + 보유 KRW): ", totalMoney)
-print("현재 평가금(=총 보유자산): ", totalRealMoney)
-print("총 자산 수익률: ", totalRevenue)
-print("---------------------------------")
-print("코인당 최대 매수 금액: ", coinMaxMoney)
-print("첫 매수할 금액: ", firstEnterMoney)
-print("추가매수(물타기) 금액: ", waterEnterMoney)
-print("---------------------------------\n\n\n")
+# print("---------------------------------")
+# print("총 투자 원금(=코인 매수 원가 + 보유 KRW): ", totalMoney)
+# print("현재 평가금(=총 보유자산): ", totalRealMoney)
+# print("총 자산 수익률: ", totalRevenue)
+# print("---------------------------------")
+# print("코인당 최대 매수 금액: ", coinMaxMoney)
+# print("첫 매수할 금액: ", firstEnterMoney)
+# print("추가매수(물타기) 금액: ", waterEnterMoney)
+# print("---------------------------------\n\n\n")
 
  
 for ticker in top10_coin_list:
@@ -496,6 +519,8 @@ for ticker in top10_coin_list:
                     - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
                     """)
                     print(message)
+                    send_gmail("✅ 매도 완료", message)
+                    time.sleep(1)
                     
                 # 현재 코인의 매수금액이 최대 매수금액의 25% 이상이면 절반씩 시장가 매도
                 else:
@@ -513,6 +538,7 @@ for ticker in top10_coin_list:
                     - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
                     """)
                     print(message)
+                    send_gmail("✅ 매도 완료", message)
 
                 # 원화 잔고 업데이트
                 won = float(upbit.get_balance("KRW"))
@@ -538,7 +564,7 @@ for ticker in top10_coin_list:
 
                 
                 message = textwrap.dedent(f"""\
-                ⚠️ 매도 실행 | 유형: SELL-LOSS-HALF
+                ⚠️ 매도 완료 | 유형: SELL-LOSS-HALF
                 - 정보: 원화 잔고 부족 & 수익률 -10% 이하 손절
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
@@ -548,6 +574,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}
                 """)
                 print(message)
+                send_gmail("✅ 매도 완료", message)
 
 
             # ==========================
@@ -567,7 +594,7 @@ for ticker in top10_coin_list:
                     balances = buyCoinMarket(upbit, ticker, waterEnterMoney)
 
                     message = textwrap.dedent(f"""\
-                    ✅ 매수 실행 | 유형: BUY-WATER-1
+                    ✅ 매수 완료 | 유형: BUY-WATER-1
                     - 정보: {waterEnterMoney}원 물타기
                     - 코인: {ticker}
                     - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
@@ -575,6 +602,7 @@ for ticker in top10_coin_list:
                     - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                     """)
                     print(message)
+                    send_gmail("✅ 매수 완료", message)
                     
 
 
@@ -600,6 +628,7 @@ for ticker in top10_coin_list:
                         - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                         """)
                         print(message)
+                        send_gmail("✅ 매수 완료", message)
 
         # ==========================
         # 아직 매수안한 코인
@@ -635,7 +664,7 @@ for ticker in top10_coin_list:
                 # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 balances = buyCoinMarket(upbit, ticker, firstEnterMoney)
                 message = textwrap.dedent(f"""\
-                ✅ 매수 실행 | 유형: BUY-NEW
+                ✅ 매수 완료 | 유형: BUY-NEW
                 - 정뵈 코인 첫 매수
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
@@ -643,9 +672,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                 """)
                 print(message)
-
-
-
+                send_gmail("✅ 매수 완료", message)
 
 
             
@@ -671,7 +698,7 @@ for ticker in top10_coin_list:
                 # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 balances = buyCoinMarket(upbit, ticker, firstEnterMoney)
                 message = textwrap.dedent(f"""\
-                ✅ 매수 실행 | 유형: BUY-NEW2
+                ✅ 매수 완료 | 유형: BUY-NEW2
                 - 정보: 코인 첫 매수 상승장 단타
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
@@ -680,6 +707,7 @@ for ticker in top10_coin_list:
                 - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
                 """)
                 print(message)
+                send_gmail("✅ 매수 완료", message)
                 time.sleep(5.0)
 
                 # 위에서 매수 후 바로 지정가 매도 거는 로직
