@@ -590,8 +590,7 @@ for ticker in top10_coin_list:
                     - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
                     - 수익률: {revenue_rate:.2f}%
                     - 매도가격: {sellPrice:.4f}
-                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
-                    """)
+                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}""")
                     print(message)
                     send_gmail("✅ 매도 완료", message)
                     time.sleep(1)
@@ -609,8 +608,7 @@ for ticker in top10_coin_list:
                     - RSI: {rsi_60_before:.2f} -> {rsi_60:.2f}
                     - 수익률: {revenue_rate:.2f}%
                     - 매도가격: {sellPrice:.4f}
-                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}
-                    """)
+                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}""")
                     print(message)
                     send_gmail("✅ 매도 완료", message)
 
@@ -645,8 +643,7 @@ for ticker in top10_coin_list:
                 - 수익률: {revenue_rate:.2f}%
                 - 매도수량: {sellPrice:.4f}
                 - 매도금액(KRW): {pyupbit.get_current_price(ticker) * sellPrice:,.0f}원
-                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}
-                """)
+                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}""")
                 print(message)
                 send_gmail("✅ 매도 완료", message)
 
@@ -673,8 +670,7 @@ for ticker in top10_coin_list:
                     - 코인: {ticker}
                     - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
                     - 매수금액: {waterEnterMoney:,.0f} KRW
-                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
-                    """)
+                    - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}""")
                     print(message)
                     send_gmail("✅ 매수 완료", message)
                     
@@ -699,8 +695,7 @@ for ticker in top10_coin_list:
                         - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
                         - 매수금액: {waterEnterMoney:,.0f} KRW
                         - 조건: 50% 이상 & 수익률 -5% 이하
-                        - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
-                        """)
+                        - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}""")
                         print(message)
                         send_gmail("✅ 매수 완료", message)
 
@@ -744,8 +739,7 @@ for ticker in top10_coin_list:
                 - 코인: {ticker}
                 - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
                 - 매수금액: {firstEnterMoney:,.0f} KRW
-                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
-                """)
+                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}""")
                 print(message)
                 send_gmail("✅ 매수 완료", message)
 
@@ -765,22 +759,18 @@ for ticker in top10_coin_list:
 
             # 15분봉 기준 완성된 20일평균선 값을 구한다
             ma20 = getMA(df_15, 20, -2)
-            # print("ma20: ", ma20)
-            # print("ma5: ", ma5, "<- ", ma5_before2, "<- ", ma5_before3)
 
             # 5일선이 20일선 밑에 있을 때 5일선이 상승 추세로 꺾이면 매수를 진행하겠다
             if ma5 < ma20 and ma5_before3 > ma5_before2 and ma5_before2 < ma5 and getHasCoinCnt(balances) < MAXCOINCNT:
-                # print(upbit.buy_market_order(ticker, firstEnterMoney))
                 balances = buyCoinMarket(upbit, ticker, firstEnterMoney)
                 message = textwrap.dedent(f"""\
-                ✅ 매수 완료 | 유형: BUY-NEW2
-                - 정보: 코인 첫 매수 상승장 단타
+                ✅ 매수 완료 | 유형: BUY-NEW2(15분봉)
+                - 정보: ma5가 ma20 아래이면서 상승 추세 변경
                 - 코인: {ticker}
-                - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}
-                - MA: {ma5_before3:.2f} → {ma5_before2:.2f} → {ma5:.2f}
+                - RSI: {rsi_60_before:.2f} → {rsi_60:.2f}(60분봉)
+                - MA: {ma5_before3:.2f} → {ma5_before2:.2f} → {ma5:.2f}(15분봉)
                 - 매수금액: {firstEnterMoney:,.0f} KRW
-                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}
-                """)
+                - 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}""")
                 print(message)
                 send_gmail("✅ 매수 완료", message)
                 time.sleep(5.0)
