@@ -63,6 +63,36 @@ pyenv deactivate
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
+## 전략 비교 백테스트
+```bash
+# V1, V2 전략을 같은 티커 구간에서 비교
+python operate/backtest_v1_v2.py --ticker KRW-BTC --day-count 180 --signal-count 360
+```
+
+## V2 시각화
+```bash
+# V2 전략 설명 이미지 생성
+python operate/v2/strategy_v2_visualizer.py
+```
+
+## V2 실행 봇
+```bash
+# 기본은 주문 없는 dry-run
+python operate/v2/v2_bot.py
+
+# 실제 주문 실행
+python operate/v2/v2_bot.py --live
+```
+
+## V0-1 실행 봇
+```bash
+# V0와 같은 로직, 공용 라이브러리 메서드 기반 봇
+python operate/v0-1/v0_1_bot.py
+
+# 실제 주문 실행
+python operate/v0-1/v0_1_bot.py --live
+```
+
 ## 문법 검사
 ```bash
 # 라이브러리 파일 문법만 빠르게 확인

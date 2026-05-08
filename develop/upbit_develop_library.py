@@ -162,6 +162,78 @@ def get_moving_average(
     return float(ma.iloc[st])
 
 
+def get_exponential_moving_average(
+    ohlcv: pd.DataFrame,
+    period: int,
+    st: int = -1,
+) -> float:
+    """종가 기준 지수이동평균선 값을 반환합니다.
+
+    Args:
+        ohlcv: ``close`` 컬럼을 포함한 OHLCV 데이터프레임입니다.
+        period: EMA 계산 기간입니다.
+        st: 조회할 위치 인덱스입니다.
+
+    Returns:
+        지정한 위치의 지수이동평균선 값입니다.
+    """
+
+    ema = ohlcv["close"].ewm(span=period, adjust=False).mean()
+    return float(ema.iloc[st])
+
+
+def calculate_atr_series(
+    ohlcv: pd.DataFrame,
+    period: int = 14,
+) -> pd.Series:
+    """OHLCV 데이터에서 ATR 시리즈 전체를 계산합니다.
+
+    Args:
+        ohlcv: ``high``, ``low``, ``close`` 컬럼을 포함한 OHLCV 데이터프레임입니다.
+        period: ATR 계산 기간입니다.
+
+    Returns:
+        각 캔들 위치별 ATR 값이 담긴 ``pandas.Series``입니다.
+    """
+
+    high = ohlcv["high"]
+    low = ohlcv["low"]
+    close = ohlcv["close"]
+    prev_close = close.shift(1)
+
+    true_range = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return pd.Series(
+        true_range.ewm(alpha=1 / period, adjust=False, min_periods=period).mean(),
+        name="ATR",
+    )
+
+
+def get_atr(
+    ohlcv: pd.DataFrame,
+    period: int = 14,
+    st: int = -1,
+) -> float:
+    """원하는 위치의 ATR 값 하나를 반환합니다.
+
+    Args:
+        ohlcv: ``high``, ``low``, ``close`` 컬럼이 포함된 OHLCV 데이터프레임입니다.
+        period: ATR 계산 기간입니다.
+        st: 위치 인덱스입니다.
+
+    Returns:
+        지정한 위치의 ATR 값입니다.
+    """
+
+    return float(calculate_atr_series(ohlcv, period).iloc[st])
+
+
 # ======================================================================
 # 아래 함수들은 업비트에서 이미 받아온 잔고 데이터가 있어야 사용하는 구간입니다.
 # 직접 API를 호출하지는 않지만, 업비트 응답 형식에 의존합니다.

@@ -132,6 +132,44 @@ class UpbitDevelopLibraryTest(unittest.TestCase):
         expected = float(self.sample_ohlcv["close"].rolling(5).mean().iloc[-1])
         self.assertAlmostEqual(actual, expected, places=8)
 
+    def test_get_exponential_moving_average(self):
+        """EMA 계산값이 pandas ewm 결과와 일치하는지 확인합니다."""
+
+        actual = lib.get_exponential_moving_average(self.sample_ohlcv, period=5, st=-1)
+        expected = float(self.sample_ohlcv["close"].ewm(span=5, adjust=False).mean().iloc[-1])
+        self.assertAlmostEqual(actual, expected, places=8)
+
+    def test_calculate_atr_series_returns_series(self):
+        """ATR 시리즈 계산 결과가 같은 길이의 pandas Series로 반환되는지 확인합니다."""
+
+        ohlcv = pd.DataFrame(
+            {
+                "high": [102, 104, 103, 107, 109, 108, 110, 112, 111, 113, 115, 114, 117, 119, 118],
+                "low": [99, 100, 99, 103, 105, 104, 106, 108, 107, 109, 111, 110, 113, 115, 114],
+                "close": [100, 102, 101, 105, 107, 106, 108, 110, 109, 111, 113, 112, 115, 117, 116],
+            }
+        )
+
+        atr_series = lib.calculate_atr_series(ohlcv, period=14)
+        self.assertEqual(atr_series.name, "ATR")
+        self.assertEqual(len(atr_series), len(ohlcv))
+        self.assertTrue(atr_series.iloc[-1] > 0)
+
+    def test_get_atr_matches_series_value(self):
+        """단일 ATR 조회값이 ATR 시리즈의 같은 위치 값과 일치하는지 확인합니다."""
+
+        ohlcv = pd.DataFrame(
+            {
+                "high": [102, 104, 103, 107, 109, 108, 110, 112, 111, 113, 115, 114, 117, 119, 118],
+                "low": [99, 100, 99, 103, 105, 104, 106, 108, 107, 109, 111, 110, 113, 115, 114],
+                "close": [100, 102, 101, 105, 107, 106, 108, 110, 109, 111, 113, 112, 115, 117, 116],
+            }
+        )
+
+        expected = float(lib.calculate_atr_series(ohlcv, period=14).iloc[-1])
+        actual = lib.get_atr(ohlcv, period=14, st=-1)
+        self.assertAlmostEqual(actual, expected, places=8)
+
     def test_has_coin(self):
         """잔고 목록에 코인이 있을 때와 없을 때를 정확히 구분하는지 확인합니다."""
 
