@@ -1,5 +1,10 @@
 .env
 *.env
 .env.*
-operate/
 .DS_Store
+__pycache__/
+*.pyc
+develop/v2/.v2_cron_state.json
+develop/v0/asset_log.csv
+develop/v0/log.txt
+develop/v0/trade_log.txt
