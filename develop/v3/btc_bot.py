@@ -35,7 +35,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from develop.notification import send_gmail
 from develop.upbit_develop_library import get_rsi
-from develop.v3.strategy_v3 import TradeConfig, decide_trade
+from develop.v3.trade_logic import TradeConfig, decide_trade
 
 # ==========================
 # 🔧 설정값

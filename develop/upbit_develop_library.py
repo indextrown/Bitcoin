@@ -9,16 +9,27 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 import pandas as pd
-import pyupbit
-from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    import pyupbit
 
 Balance = dict[str, Any]
 BalanceMap = dict[str, Balance]
 
 _TOP_COIN_LIST_CACHE: dict[tuple[str, int, str], tuple[float, list[str]]] = {}
+
+
+def _load_pyupbit() -> Any:
+    """업비트 API를 실제로 호출할 때만 pyupbit를 불러옵니다."""
+
+    try:
+        import pyupbit
+    except ModuleNotFoundError as error:
+        raise RuntimeError("pyupbit is required for Upbit API calls.") from error
+    return pyupbit
 
 
 def _compose_balance_ticker(balance: Balance) -> str:
@@ -369,6 +380,11 @@ def create_upbit_client(
         ValueError: API 키 둘 중 하나라도 없으면 발생합니다.
     """
 
+    try:
+        from dotenv import load_dotenv
+    except ModuleNotFoundError as error:
+        raise RuntimeError("python-dotenv is required for Upbit API calls.") from error
+
     load_dotenv(env_file)
     access_key = os.getenv(access_key_var)
     secret_key = os.getenv(secret_key_var)
@@ -378,7 +394,7 @@ def create_upbit_client(
             f"Missing Upbit API keys. Expected {access_key_var} and {secret_key_var}."
         )
 
-    return pyupbit.Upbit(access_key, secret_key)
+    return _load_pyupbit().Upbit(access_key, secret_key)
 
 
 def list_krw_tickers(fiat: str = "KRW") -> list[str]:
@@ -391,7 +407,7 @@ def list_krw_tickers(fiat: str = "KRW") -> list[str]:
         해당 마켓에 속한 티커 문자열 목록입니다.
     """
 
-    tickers = pyupbit.get_tickers(fiat)
+    tickers = _load_pyupbit().get_tickers(fiat)
     return tickers or []
 
 
@@ -411,6 +427,7 @@ def get_ticker_prices(
         ``{티커: 현재가}`` 형태의 딕셔너리입니다. 조회 실패 시 값은 ``None``입니다.
     """
 
+    pyupbit = _load_pyupbit()
     unique_tickers = list(dict.fromkeys(tickers))
     prices: dict[str, float | None] = {}
 
@@ -459,7 +476,7 @@ def get_ohlcv(
         ValueError: 차트 데이터를 가져오지 못했을 때 발생합니다.
     """
 
-    df = pyupbit.get_ohlcv(ticker, interval=interval, count=count)
+    df = _load_pyupbit().get_ohlcv(ticker, interval=interval, count=count)
     if df is None or df.empty:
         raise ValueError(f"Failed to fetch OHLCV data for {ticker} ({interval}).")
     return df
@@ -747,7 +764,7 @@ def buy_coin_limit(
         업비트 지정가 매수 주문 응답입니다.
     """
 
-    return upbit.buy_limit_order(ticker, pyupbit.get_tick_size(price), volume)
+    return upbit.buy_limit_order(ticker, _load_pyupbit().get_tick_size(price), volume)
 
 
 def sell_coin_limit(
@@ -768,7 +785,7 @@ def sell_coin_limit(
         업비트 지정가 매도 주문 응답입니다.
     """
 
-    return upbit.sell_limit_order(ticker, pyupbit.get_tick_size(price), volume)
+    return upbit.sell_limit_order(ticker, _load_pyupbit().get_tick_size(price), volume)
 
 
 def cancel_coin_orders(

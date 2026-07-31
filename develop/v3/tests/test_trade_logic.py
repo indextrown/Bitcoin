@@ -1,9 +1,9 @@
 import unittest
 
-from develop.v3.strategy_v3 import TradeConfig, decide_trade
+from develop.v3.trade_logic import TradeConfig, decide_trade
 
 
-class StrategyV3Test(unittest.TestCase):
+class TradeLogicTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = TradeConfig()
 

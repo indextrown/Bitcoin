@@ -1,9 +1,13 @@
 # source .venv/bin/activate  # 가상 환경 활성화
 # pip install -r requirements.txt
 
+# ./.venv/bin/python -m pip install -r requirements.txt
+# ./.venv/bin/python backtesting/v3/v3_backtest_visualizer.py --ticker KRW-ETH --interval minute240 --count 200
+
 # 비트코인 자동매매
 pyupbit
 dotenv
 
 # 비트코인 백테스팅
 matplotlib
+pandas

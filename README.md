@@ -36,7 +36,7 @@ pyenv install 3.11.9
 pyenv local 3.11.9
 
 # 3. 가상환경 생성
-python -m venv .venv
+python3 -m venv .venv
 
 # 4. 가상환경 활성화 (Linux & macOS)
 source .venv/bin/activate
@@ -76,6 +76,7 @@ develop/
   v0/  # 초기 운영 코드
   v1/  # V1 전략과 봇
   v2/  # V2 전략과 봇
+  v3/  # V3 전략, 봇, 전용 백테스트
 backtesting/
   v2/  # V2 연구 노트북과 문서
 ```
@@ -88,6 +89,7 @@ python -m unittest discover -s develop/v0/tests -p 'test_*.py' -v
 python -m unittest discover -s develop/v1/tests -p 'test_*.py' -v
 python -m unittest discover -s develop/v2/tests -p 'test_*.py' -v
 python -m unittest discover -s develop/v3/tests -p 'test_*.py' -v
+python -m unittest discover -s develop/v3/backtesting/tests -p 'test_*.py' -v
 python -m unittest discover -s backtesting/tests -p 'test_*.py' -v
 ```
 
@@ -96,6 +98,15 @@ python -m unittest discover -s backtesting/tests -p 'test_*.py' -v
 # V1, V2 전략을 같은 티커 구간에서 비교
 python backtesting/backtest_v1_v2.py --ticker KRW-BTC --day-count 180 --signal-count 360
 ```
+
+## V3 백테스트 시각화
+```bash
+# 가격 차트의 매수·매도 지점, RSI, 자산 곡선을 PNG로 저장
+python3 develop/v3/backtesting/backtest_visualizer.py --ticker KRW-ETH --interval minute240 --count 200
+```
+
+- 신호는 캔들 마감 RSI로 판단하고, 주문은 다음 캔들의 시가에 체결된다고 가정합니다.
+- 기본 시작 자금은 1,000,000원이며, 수수료 가정은 주문당 0.05%입니다.
 
 ## V2 시각화
 ```bash
