@@ -2,15 +2,7 @@
 
 set -euo pipefail
 
-REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPOSITORY_ROOT"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-git add .
-
-if git diff --cached --quiet; then
-    echo "커밋할 변경사항이 없습니다."
-    exit 0
-fi
-
-git commit -m "update"
-git push
+"$SCRIPT_DIR/pull.sh"
+"$SCRIPT_DIR/push.sh"

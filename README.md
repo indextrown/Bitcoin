@@ -15,9 +15,15 @@ git commit -m "feat: 기능 설명"
 git push origin feature/기능이름
 ```
 
-## 빠른 업데이트
+## 원격 저장소 동기화
 ```bash
+# 다른 팀원의 원격 변경사항을 현재 브랜치에 반영
+make pull
+
 # 모든 변경사항을 stage한 뒤 "update" 메시지로 커밋하고 push
+make push
+
+# 원격 변경사항을 먼저 반영한 뒤, 로컬 변경사항을 커밋하고 push
 make update
 ```
 
