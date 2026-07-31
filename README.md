@@ -87,6 +87,7 @@ python -m unittest discover -s develop/tests -p 'test_*.py' -v
 python -m unittest discover -s develop/v0/tests -p 'test_*.py' -v
 python -m unittest discover -s develop/v1/tests -p 'test_*.py' -v
 python -m unittest discover -s develop/v2/tests -p 'test_*.py' -v
+python -m unittest discover -s develop/v3/tests -p 'test_*.py' -v
 python -m unittest discover -s backtesting/tests -p 'test_*.py' -v
 ```
 
