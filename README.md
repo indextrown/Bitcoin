@@ -101,6 +101,9 @@ python backtesting/backtest_v1_v2.py --ticker KRW-BTC --day-count 180 --signal-c
 
 ## V3 백테스트 시각화
 ```bash
+# 기본 V3 설정으로 PNG 생성
+make backtest v3
+
 # 가격 차트의 매수·매도 지점, RSI, 자산 곡선을 PNG로 저장
 python3 develop/v3/backtesting/backtest_visualizer.py --ticker KRW-ETH --interval minute240 --count 200
 
