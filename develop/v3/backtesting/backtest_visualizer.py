@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 from develop.upbit_develop_library import get_ohlcv  # noqa: E402
 from develop.v3.backtesting.backtest_logic import (  # noqa: E402
     BacktestResult,
+    BacktestTrade,
     calculate_period_source_count,
     calculate_source_count,
     run_backtest,
@@ -34,10 +35,34 @@ from develop.v3.backtesting.ohlcv_cache import (  # noqa: E402
 from develop.v3.config import V3_CONFIG, V3Config, interval_to_timedelta  # noqa: E402
 
 
+def select_executed_trade_rsi_points(
+    rsi: pd.Series,
+    trades: list[BacktestTrade],
+) -> tuple[pd.Series, pd.Series]:
+    """실제로 체결된 매수·매도 주문의 RSI 지점만 각각 반환합니다.
+
+    크론 실행 시점, 보유 상태, 최소 주문금액까지 통과해 ``result.trades``에 기록된 주문만
+    골라내므로, 가격 그래프의 체결 마커와 RSI 그래프의 점이 항상 같은 주문을 가리킵니다.
+
+    Args:
+        rsi: 시간 인덱스와 RSI 값을 가진 시리즈입니다.
+        trades: 백테스트에서 실제 체결한 주문 기록입니다.
+
+    Returns:
+        ``(체결_매수_RSI, 체결_매도_RSI)`` 순서의 두 시리즈입니다. 매도에는
+        ``SELL_LOSS``와 ``SELL_PROFIT``을 모두 포함합니다.
+    """
+
+    buy_times = [trade.signal_time for trade in trades if trade.action == "BUY"]
+    sell_times = [trade.signal_time for trade in trades if trade.action.startswith("SELL_")]
+    return rsi.reindex(buy_times).dropna(), rsi.reindex(sell_times).dropna()
+
+
 def plot_backtest(
     result: BacktestResult,
     output_path: Path,
     config: V3Config = V3_CONFIG,
+    show_rsi_signal_points: bool = False,
 ) -> None:
     """가격·RSI·자산 곡선과 설정값을 한 PNG 파일로 저장합니다.
 
@@ -45,6 +70,8 @@ def plot_backtest(
         result: 순수 백테스트가 계산한 가격, RSI, 자산 곡선, 체결 기록입니다.
         output_path: 생성할 PNG 파일의 전체 또는 상대 경로입니다.
         config: 제목·RSI 기준선·수수료 표시에 사용할 V3 설정입니다.
+        show_rsi_signal_points: ``True``면 실제로 체결한 매수·매도 주문의 RSI 지점에
+            각각 파란·빨간 점을 표시합니다. 가격 그래프의 체결 마커와 같은 주문을 표시합니다.
     """
 
     import matplotlib.pyplot as plt
@@ -121,6 +148,27 @@ def plot_backtest(
         linestyle="--",
         label="sell threshold",
     )
+    if show_rsi_signal_points:
+        buy_signal_points, sell_signal_points = select_executed_trade_rsi_points(
+            result.rsi,
+            result.trades,
+        )
+        rsi_axis.scatter(
+            buy_signal_points.index,
+            buy_signal_points,
+            color="tab:blue",
+            s=24,
+            label="executed buy",
+            zorder=3,
+        )
+        rsi_axis.scatter(
+            sell_signal_points.index,
+            sell_signal_points,
+            color="tab:red",
+            s=24,
+            label="executed sell",
+            zorder=3,
+        )
     rsi_axis.set_ylabel("RSI")
     rsi_axis.set_ylim(0, 100)
     rsi_axis.legend(loc="best")
@@ -182,7 +230,8 @@ def parse_args() -> argparse.Namespace:
     """공용 V3 설정을 기본값으로 사용하는 시각화 실행 인자를 읽습니다.
 
     Returns:
-        티커, 전략 봉, 조회 개수, 기간, 자금, 수수료, 크론 가정, PNG 경로를 담은 인자입니다.
+        티커, 전략 봉, 조회 개수, 기간, 자금, 수수료, 크론 가정, RSI 신호 점 표시 여부,
+        PNG 경로를 담은 인자입니다.
     """
 
     parser = argparse.ArgumentParser(description="Visualize V3 trade logic on historical OHLCV data.")
@@ -221,6 +270,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=V3_CONFIG.backtest.cron_interval_minutes,
         help="백테스트에서 가정할 crontab 실행 간격(분)",
+    )
+    parser.add_argument(
+        "--show-rsi-signal-points",
+        action="store_true",
+        help="실제 체결한 매수·매도 주문의 RSI 지점에 파란·빨간 점을 표시합니다.",
     )
     parser.add_argument(
         "--output",
@@ -334,7 +388,12 @@ def main() -> None:
         simulation_start,
         result_end,
     )
-    plot_backtest(result, args.output, runtime_config)
+    plot_backtest(
+        result,
+        args.output,
+        runtime_config,
+        show_rsi_signal_points=args.show_rsi_signal_points,
+    )
     print(f"output: {args.output}")
     print(f"source interval: {source_interval}")
     print(f"cache: {DEFAULT_CACHE_DIR}")

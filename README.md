@@ -110,6 +110,9 @@ make backtest v3 FROM=2026-01-01
 # 특정 시작일·종료일(둘 다 포함)로 PNG 생성
 make backtest v3 FROM=2026-01-01 TO=2026-06-30
 
+# 실제 매수·매도 체결 지점의 RSI를 파란·빨간 점으로 표시
+make backtest v3 SHOW_RSI_SIGNAL_POINTS=1
+
 # 가격 차트의 매수·매도 지점, RSI, 자산 곡선을 PNG로 저장
 python3 develop/v3/backtesting/backtest_visualizer.py --ticker KRW-ETH --interval minute240 --count 200
 
@@ -121,6 +124,9 @@ python3 develop/v3/backtesting/backtest_visualizer.py --from 2026-01-01
 
 # 특정 시작일·종료일(둘 다 포함)만 조회
 python3 develop/v3/backtesting/backtest_visualizer.py --from 2026-01-01 --to 2026-06-30
+
+# 실제 매수·매도 체결 지점의 RSI를 파란·빨간 점으로 표시
+python3 develop/v3/backtesting/backtest_visualizer.py --show-rsi-signal-points
 ```
 
 - 공용 V3 설정은 `develop/v3/config.py`에서 변경합니다. 봇, 백테스트, PNG 표시값이 같은 설정을 사용합니다.

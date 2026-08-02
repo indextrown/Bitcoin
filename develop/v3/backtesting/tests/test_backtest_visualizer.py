@@ -4,12 +4,16 @@ from dataclasses import replace
 import pandas as pd
 
 from develop.v3.backtesting.backtest_logic import (
+    BacktestTrade,
     build_strategy_ohlcv,
     calculate_period_source_count,
     run_backtest,
     validate_ohlcv,
 )
-from develop.v3.backtesting.backtest_visualizer import parse_backtest_period
+from develop.v3.backtesting.backtest_visualizer import (
+    parse_backtest_period,
+    select_executed_trade_rsi_points,
+)
 from develop.v3.config import V3_CONFIG
 
 
@@ -194,3 +198,19 @@ class V3BacktestVisualizerTest(unittest.TestCase):
 
         self.assertEqual(start_time, pd.Timestamp("2025-01-01 00:00:00"))
         self.assertEqual(end_time, pd.Timestamp("2025-02-01 00:00:00"))
+
+    # RSI 그래프의 점은 RSI 조건만 충족한 시점이 아니라 실제 체결 주문과 같아야 한다.
+    def test_select_executed_trade_rsi_points_uses_only_actual_trades(self) -> None:
+        """매수·매도 체결 기록의 시각만 각각 RSI 점으로 반환하는지 확인합니다."""
+
+        index = pd.date_range("2025-01-01", periods=6, freq="4h")
+        rsi = pd.Series([29.0, 30.0, 31.0, 69.0, 70.0, 71.0], index=index)
+        trades = [
+            BacktestTrade("BUY", index[1], index[1], 100.0, 10_000.0, 0.0),
+            BacktestTrade("SELL_PROFIT", index[4], index[4], 110.0, 1.0, 10.0),
+        ]
+
+        buy_points, sell_points = select_executed_trade_rsi_points(rsi, trades)
+
+        self.assertEqual(list(buy_points), [30.0])
+        self.assertEqual(list(sell_points), [70.0])

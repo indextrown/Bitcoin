@@ -1,6 +1,6 @@
 .PHONY: pull push update backtest v3
 
-BACKTEST_V3_ARGS := $(if $(FROM),--from $(FROM)) $(if $(TO),--to $(TO))
+BACKTEST_V3_ARGS := $(if $(FROM),--from $(FROM)) $(if $(TO),--to $(TO)) $(if $(SHOW_RSI_SIGNAL_POINTS),--show-rsi-signal-points)
 
 pull:
 	@./scripts/pull.sh
