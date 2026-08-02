@@ -11,6 +11,7 @@ from develop.v3.backtesting.backtest_logic import (
     validate_ohlcv,
 )
 from develop.v3.backtesting.backtest_visualizer import (
+    format_backtest_summary,
     parse_backtest_period,
     select_executed_trade_rsi_points,
 )
@@ -214,3 +215,20 @@ class V3BacktestVisualizerTest(unittest.TestCase):
 
         self.assertEqual(list(buy_points), [30.0])
         self.assertEqual(list(sell_points), [70.0])
+
+    # PNG 제목의 결과 요약은 원금, 체결 수, 최종 자산, 수익률을 모두 보여 준다.
+    def test_format_backtest_summary_includes_all_requested_metrics(self) -> None:
+        """두 번째 제목 줄에 표시할 백테스트 핵심 수치가 빠짐없이 만들어지는지 확인합니다."""
+
+        result = run_backtest(
+            self.make_ohlcv([200.0 - index for index in range(20)]),
+            self.make_coarse_candle_config(),
+            self.strategy_candle_anchor(),
+        )
+
+        summary = format_backtest_summary(result)
+
+        self.assertIn("initial capital: 1,000,000 KRW", summary)
+        self.assertIn(f"trades: {len(result.trades)}", summary)
+        self.assertIn(f"final equity: {result.final_equity:,.0f} KRW", summary)
+        self.assertIn(f"total return: {result.total_return_pct:.2f}%", summary)

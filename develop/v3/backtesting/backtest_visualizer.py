@@ -58,6 +58,26 @@ def select_executed_trade_rsi_points(
     return rsi.reindex(buy_times).dropna(), rsi.reindex(sell_times).dropna()
 
 
+def format_backtest_summary(result: BacktestResult) -> str:
+    """PNG 제목의 둘째 줄에 표시할 백테스트 결과 요약 문자열을 만듭니다.
+
+    Args:
+        result: 원금, 실제 체결 기록, 최종 자산, 수익률을 포함한 백테스트 결과입니다.
+
+    Returns:
+        원금·체결 수·최종 자산·총수익률을 사람이 읽기 쉬운 한 줄로 연결한 문자열입니다.
+    """
+
+    return " | ".join(
+        [
+            f"initial capital: {result.initial_capital:,.0f} KRW",
+            f"trades: {len(result.trades)}",
+            f"final equity: {result.final_equity:,.0f} KRW",
+            f"total return: {result.total_return_pct:.2f}%",
+        ]
+    )
+
+
 def plot_backtest(
     result: BacktestResult,
     output_path: Path,
@@ -84,21 +104,20 @@ def plot_backtest(
         sharex=True,
         height_ratios=[2, 1, 1],
     )
-    figure.suptitle(
-        " | ".join(
-            [
-                config.ticker,
-                config.interval,
-                f"RSI({config.strategy.rsi_period})",
-                f"buy ≤ {config.strategy.trade.buy_threshold:g}",
-                f"sell ≥ {config.strategy.trade.sell_threshold:g}",
-                f"take profit ≥ {config.strategy.trade.sell_profit_pct:g}%",
-                f"fee {config.backtest.fee_rate * 100:.02f}%",
-                f"cron assumption {config.backtest.cron_interval_minutes}m",
-                f"period {result.close_prices.index[0]:%Y-%m-%d} ~ {result.close_prices.index[-1]:%Y-%m-%d}",
-            ]
-        )
+    settings_line = " | ".join(
+        [
+            config.ticker,
+            config.interval,
+            f"RSI({config.strategy.rsi_period})",
+            f"buy ≤ {config.strategy.trade.buy_threshold:g}",
+            f"sell ≥ {config.strategy.trade.sell_threshold:g}",
+            f"take profit ≥ {config.strategy.trade.sell_profit_pct:g}%",
+            f"fee {config.backtest.fee_rate * 100:.02f}%",
+            f"cron assumption {config.backtest.cron_interval_minutes}m",
+            f"period {result.close_prices.index[0]:%Y-%m-%d} ~ {result.close_prices.index[-1]:%Y-%m-%d}",
+        ]
     )
+    figure.suptitle(f"{settings_line}\n{format_backtest_summary(result)}")
 
     price_axis.plot(
         result.close_prices.index,
@@ -180,7 +199,7 @@ def plot_backtest(
     equity_axis.legend(loc="best")
     equity_axis.grid(alpha=0.25)
 
-    figure.tight_layout(rect=(0, 0, 1, 0.96))
+    figure.tight_layout(rect=(0, 0, 1, 0.93))
     figure.savefig(output_path, dpi=150)
     plt.close(figure)
 
