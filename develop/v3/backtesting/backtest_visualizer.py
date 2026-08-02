@@ -29,7 +29,14 @@ def plot_backtest(
     output_path: Path,
     config: V3Config = V3_CONFIG,
 ) -> None:
-    """가격·RSI·자산 곡선과 설정값을 한 PNG 파일로 저장합니다."""
+    """가격·RSI·자산 곡선과 설정값을 한 PNG 파일로 저장합니다.
+
+    Args:
+        ohlcv: 크론 재현에 사용한 원본 OHLCV 데이터입니다. 가격 선을 그릴 때 사용합니다.
+        result: 순수 백테스트가 계산한 RSI, 자산 곡선, 체결 기록입니다.
+        output_path: 생성할 PNG 파일의 전체 또는 상대 경로입니다.
+        config: 제목·RSI 기준선·수수료 표시에 사용할 V3 설정입니다.
+    """
 
     import matplotlib.pyplot as plt
 
@@ -121,14 +128,28 @@ def plot_backtest(
 
 
 def parse_args() -> argparse.Namespace:
-    """공용 V3 설정을 기본값으로 사용하는 시각화 실행 인자를 읽습니다."""
+    """공용 V3 설정을 기본값으로 사용하는 시각화 실행 인자를 읽습니다.
+
+    Returns:
+        티커, 전략 봉, 조회 개수, 자금, 수수료, 크론 가정, PNG 경로를 담은 인자입니다.
+    """
 
     parser = argparse.ArgumentParser(description="Visualize V3 trade logic on historical OHLCV data.")
-    parser.add_argument("--ticker", default=V3_CONFIG.ticker)
-    parser.add_argument("--interval", default=V3_CONFIG.interval)
-    parser.add_argument("--count", type=int, default=200)
-    parser.add_argument("--initial-capital", type=float, default=V3_CONFIG.backtest.initial_capital)
-    parser.add_argument("--fee-rate", type=float, default=V3_CONFIG.backtest.fee_rate)
+    parser.add_argument("--ticker", default=V3_CONFIG.ticker, help="분석할 업비트 마켓 티커입니다.")
+    parser.add_argument("--interval", default=V3_CONFIG.interval, help="RSI 전략이 사용할 업비트 캔들 간격입니다.")
+    parser.add_argument("--count", type=int, default=200, help="그래프에 사용할 전략 봉의 목표 개수입니다.")
+    parser.add_argument(
+        "--initial-capital",
+        type=float,
+        default=V3_CONFIG.backtest.initial_capital,
+        help="백테스트 시작 원화 자산입니다.",
+    )
+    parser.add_argument(
+        "--fee-rate",
+        type=float,
+        default=V3_CONFIG.backtest.fee_rate,
+        help="매수·매도 주문마다 적용할 수수료 비율입니다. (0.0005 = 0.05%%)",
+    )
     parser.add_argument(
         "--cron-interval-minutes",
         type=int,
@@ -139,12 +160,18 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=Path(__file__).with_name("v3_backtest.png"),
+        help="생성할 PNG 파일 경로입니다.",
     )
     return parser.parse_args()
 
 
 def main() -> None:
-    """과거 OHLCV를 조회하고 V3 백테스트 PNG와 요약 결과를 생성합니다."""
+    """과거 OHLCV를 조회하고 V3 백테스트 PNG와 요약 결과를 생성합니다.
+
+    CLI 인자로 공용 설정의 일부를 덮어쓴 뒤, 크론 가정에 맞는 원본 봉과 업비트의
+    실제 전략 봉 시작 시각을 조회합니다. 이 함수는 네트워크 호출과 PNG 파일 저장을
+    담당하며, 순수 매매 판단은 ``run_backtest``에 맡깁니다.
+    """
 
     args = parse_args()
     runtime_config = replace(

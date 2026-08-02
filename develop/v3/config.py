@@ -17,23 +17,34 @@ class BacktestConfig:
     않습니다.
     """
 
-    initial_capital: float = 1_000_000.0
-    fee_rate: float = 0.0005
-    cron_interval_minutes: int = 30
+    initial_capital: float = 1_000_000.0  # 시뮬레이션 시작 시 보유한 원화(KRW)입니다.
+    fee_rate: float = 0.0005  # 매수·매도 주문마다 적용할 수수료 비율입니다. (0.0005 = 0.05%)
+    cron_interval_minutes: int = 30  # 시뮬레이터가 봇을 실행한다고 가정할 간격(분)입니다.
 
 
 @dataclass(frozen=True)
 class V3Config:
     """V3 봇·백테스트·시각화가 공통으로 읽는 전체 설정입니다."""
 
-    ticker: str = "KRW-ETH"
-    interval: str = "minute240"
-    strategy: StrategyConfig = field(default_factory=StrategyConfig)
-    backtest: BacktestConfig = field(default_factory=BacktestConfig)
+    ticker: str = "KRW-ETH"  # 거래·분석할 업비트 마켓 티커입니다. 예: ``KRW-ETH``
+    interval: str = "minute240"  # RSI 전략이 기준으로 삼을 업비트 캔들 간격입니다.
+    strategy: StrategyConfig = field(default_factory=StrategyConfig)  # RSI·매수·매도 전략 설정입니다.
+    backtest: BacktestConfig = field(default_factory=BacktestConfig)  # 시뮬레이터 전용 자금·수수료·크론 가정입니다.
 
 
 def interval_to_timedelta(interval: str) -> timedelta:
-    """업비트 캔들 간격 문자열을 해당 캔들 길이로 변환합니다."""
+    """업비트 캔들 간격 문자열을 해당 캔들 길이로 변환합니다.
+
+    Args:
+        interval: ``minute30``, ``minute240``, ``day``처럼 업비트가 사용하는
+            캔들 간격 문자열입니다.
+
+    Returns:
+        입력 간격이 나타내는 시간 길이입니다.
+
+    Raises:
+        ValueError: 지원하지 않거나 분 단위 숫자가 잘못된 간격일 때 발생합니다.
+    """
 
     if interval == "day":
         return timedelta(days=1)
@@ -47,4 +58,5 @@ def interval_to_timedelta(interval: str) -> timedelta:
     raise ValueError(f"Unsupported interval: {interval}")
 
 
+# 실제 봇은 ticker·interval·strategy만, 시뮬레이터는 backtest까지 함께 읽는 기본 V3 설정입니다.
 V3_CONFIG = V3Config()

@@ -39,30 +39,34 @@ from develop.v3.trade_logic import build_signal, decide_trade
 # ==========================
 # 🔧 설정값
 # ==========================
-GMAIL_ADDRESS = "indextrown@gmail.com"
-TO_EMAIL = ["indextrown@gmail.com", "wjs9643@naver.com"]
+GMAIL_ADDRESS = "indextrown@gmail.com"  # 거래 알림을 보낼 Gmail 계정입니다.
+TO_EMAIL = ["indextrown@gmail.com", "wjs9643@naver.com"]  # 거래 결과를 받을 이메일 주소 목록입니다.
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSET_LOG_PATH = os.path.join(BASE_DIR, "asset_log.csv")
-TRADE_LOG_PATH = os.path.join(BASE_DIR, "trade_log.txt")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # V3 실행 코드가 있는 디렉터리입니다.
+ASSET_LOG_PATH = os.path.join(BASE_DIR, "asset_log.csv")  # 자산·RSI 기록 CSV 파일 경로입니다.
+TRADE_LOG_PATH = os.path.join(BASE_DIR, "trade_log.txt")  # 주문·오류 메시지 기록 파일 경로입니다.
 
 
 # ==========================
 # 🔐 API 초기화
 # ==========================
 load_dotenv()
-ACCESS_KEY = os.getenv("ACCESS_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "")
+ACCESS_KEY = os.getenv("ACCESS_KEY")  # 업비트 API 공개 키입니다. ``.env``에서만 읽습니다.
+SECRET_KEY = os.getenv("SECRET_KEY")  # 업비트 API 비밀 키입니다. ``.env``에서만 읽습니다.
+GMAIL_APP_PASSWORD = (os.getenv("GMAIL_APP_PASSWORD") or "").replace(" ", "")  # Gmail 앱 비밀번호입니다.
 
 upbit = pyupbit.Upbit(ACCESS_KEY, SECRET_KEY)
-BASE_COIN = V3_CONFIG.ticker.split("-")[1]
+BASE_COIN = V3_CONFIG.ticker.split("-")[1]  # ``KRW-ETH``에서 잔고 조회에 쓸 ``ETH`` 부분입니다.
 
 # ==========================
 # 💰 잔고 조회 함수
 # ==========================
 def get_account_status():
-    """업비트 잔고에서 V3 티커의 원화·코인 수량·평균 매수가를 반환합니다."""
+    """업비트 잔고에서 V3 티커의 원화·코인 수량·평균 매수가를 반환합니다.
+
+    Returns:
+        순서대로 가용 원화 잔고(KRW), 보유 코인 수량, 평균 매수가를 반환합니다.
+    """
 
     balances = upbit.get_balances()
     krw = next((float(x["balance"]) for x in balances if x["currency"] == "KRW"), 0.0)
@@ -74,7 +78,18 @@ def get_account_status():
 # 📊 로그 함수 (RSI 포함)
 # ==========================
 def log_asset(now_str, price, krw, coin_amt, rsi):
-    """현재 자산과 RSI를 CSV 한 줄로 저장하고 계산된 총자산을 반환합니다."""
+    """현재 자산과 RSI를 CSV 한 줄로 저장하고 계산된 총자산을 반환합니다.
+
+    Args:
+        now_str: 자산을 기록한 실행 시각 문자열입니다.
+        price: 현재 코인 가격으로, 보유 코인을 원화로 환산할 때 사용합니다.
+        krw: 현재 가용 원화 잔고입니다.
+        coin_amt: 현재 보유한 대상 코인 수량입니다.
+        rsi: 해당 시점에 계산한 최신 RSI 값입니다.
+
+    Returns:
+        원화 잔고와 코인 평가액을 합친 총자산입니다.
+    """
 
     total_asset = krw + coin_amt * price
     line = f"{now_str},{price},{krw},{coin_amt},{total_asset},{rsi:.2f}\n"
@@ -83,7 +98,11 @@ def log_asset(now_str, price, krw, coin_amt, rsi):
     return total_asset
 
 def log_trade(text):
-    """주문 또는 오류 메시지를 거래 로그에 추가하며, 로그 실패는 무시합니다."""
+    """주문 또는 오류 메시지를 거래 로그에 추가하며, 로그 실패는 무시합니다.
+
+    Args:
+        text: 파일에 추가할 주문 성공·실패·오류 메시지입니다.
+    """
 
     try:
         with open(TRADE_LOG_PATH, "a", encoding="utf-8") as f:
@@ -95,7 +114,12 @@ def log_trade(text):
 # 🚀 메인 실행
 # ==========================
 def main():
-    """최신 캔들로 V3 신호를 만들고, 판단 결과에 따라 실제 주문을 실행합니다."""
+    """최신 캔들로 V3 신호를 만들고, 판단 결과에 따라 실제 주문을 실행합니다.
+
+    실행 주기는 이 함수에 설정하지 않습니다. 실제 서버의 crontab이 이 스크립트를
+    언제 호출할지 결정하며, ``BacktestConfig.cron_interval_minutes``는 사용하지
+    않습니다.
+    """
 
     df = pyupbit.get_ohlcv(V3_CONFIG.ticker, interval=V3_CONFIG.interval)
     if df is None:

@@ -15,7 +15,15 @@ class V3BacktestVisualizerTest(unittest.TestCase):
     """V3 순수 백테스트가 공용 설정과 체결 가정을 지키는지 검증합니다."""
 
     def make_ohlcv(self, closes: list[float]) -> pd.DataFrame:
-        """종가 목록을 백테스트에 필요한 시가·종가 OHLCV 데이터로 변환합니다."""
+        """종가 목록을 백테스트에 필요한 시가·종가 OHLCV 데이터로 변환합니다.
+
+        Args:
+            closes: 시간순으로 나열한 합성 캔들의 종가 목록입니다. 테스트에서는
+                단순화를 위해 같은 값을 시가에도 사용합니다.
+
+        Returns:
+            4시간 간격 ``DatetimeIndex``와 ``open``·``close`` 컬럼을 가진 데이터입니다.
+        """
 
         index = pd.date_range("2025-01-01", periods=len(closes), freq="4h")
         return pd.DataFrame(

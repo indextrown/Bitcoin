@@ -15,25 +15,25 @@ from develop.v3.trade_logic import build_signal, decide_trade
 class BacktestTrade:
     """원본 봉 종료 시점의 다음 원본 봉 시가 체결을 기록한 주문입니다."""
 
-    action: str
-    signal_time: pd.Timestamp
-    execution_time: pd.Timestamp
-    execution_price: float
-    order_amount: float
-    profit_rate: float
+    action: str  # ``BUY``, ``SELL_LOSS``, ``SELL_PROFIT`` 중 실제 체결한 행동입니다.
+    signal_time: pd.Timestamp  # RSI 신호를 계산하고 주문을 판단한 원본 봉 종료 시각입니다.
+    execution_time: pd.Timestamp  # 다음 원본 봉 시가로 체결했다고 가정한 시각입니다.
+    execution_price: float  # 가상 체결에 적용한 다음 원본 봉의 시가입니다.
+    order_amount: float  # 매수면 원화 금액, 매도면 코인 수량입니다.
+    profit_rate: float  # 매도 판단 시 평균 매수가 기준 수익률(%)입니다.
 
 
 @dataclass(frozen=True)
 class BacktestResult:
     """순수 백테스트가 반환하는 거래 기록, RSI, 자산 변화 결과입니다."""
 
-    initial_capital: float
-    final_equity: float
-    total_return_pct: float
-    rsi: pd.Series
-    equity_curve: pd.Series
-    trades: list[BacktestTrade]
-    evaluation_times: list[pd.Timestamp]
+    initial_capital: float  # 시작 원화 자산입니다.
+    final_equity: float  # 마지막 원본 봉 종료 시점의 원화 환산 총자산입니다.
+    total_return_pct: float  # 시작 자산 대비 최종 수익률(%)입니다.
+    rsi: pd.Series  # 각 원본 봉 종료 시점에 계산한 RSI 시계열입니다.
+    equity_curve: pd.Series  # 각 원본 봉 종료 시점의 원화 환산 총자산 시계열입니다.
+    trades: list[BacktestTrade]  # 시뮬레이션에서 실제로 체결된 주문 기록입니다.
+    evaluation_times: list[pd.Timestamp]  # 크론 가정에 따라 매매 판단을 실행한 시각입니다.
 
 
 def select_source_interval(cron_interval_minutes: int) -> str:
@@ -42,6 +42,15 @@ def select_source_interval(cron_interval_minutes: int) -> str:
     예를 들어 30분 크론은 ``minute30`` 원본을, 90분 크론은 ``minute30`` 원본을
     사용합니다. 원본 간격은 크론 주기를 정확히 나눌 수 있어야 각 실행 시점을
     미래 데이터 없이 재현할 수 있습니다.
+
+    Args:
+        cron_interval_minutes: 시뮬레이터가 봇을 실행한다고 가정할 분 단위 간격입니다.
+
+    Returns:
+        크론 간격을 나누는 가장 긴 업비트 ``minuteN`` 원본 캔들 간격입니다.
+
+    Raises:
+        ValueError: 크론 간격이 0 이하일 때 발생합니다.
     """
 
     if cron_interval_minutes <= 0:
@@ -58,7 +67,19 @@ def calculate_source_count(
     source_interval: str,
     strategy_candle_count: int,
 ) -> int:
-    """전략 봉 개수만큼의 기간을 덮는 원본 캔들 조회 개수를 계산합니다."""
+    """전략 봉 개수만큼의 기간을 덮는 원본 캔들 조회 개수를 계산합니다.
+
+    Args:
+        strategy_interval: RSI 전략이 사용할 업비트 캔들 간격입니다.
+        source_interval: 크론 실행 시점 재현에 사용할 더 짧은 업비트 캔들 간격입니다.
+        strategy_candle_count: 그래프와 RSI 계산에 확보할 전략 봉의 목표 개수입니다.
+
+    Returns:
+        ``source_interval``로 업비트에서 조회해야 할 원본 봉 개수입니다.
+
+    Raises:
+        ValueError: 요청 봉 수가 0 이하이거나 원본 봉이 전략 봉보다 길 때 발생합니다.
+    """
 
     if strategy_candle_count <= 0:
         raise ValueError("strategy_candle_count must be greater than zero.")
@@ -83,6 +104,14 @@ def build_strategy_ohlcv(
     같은 종류의 스냅샷을 만들기 위한 처리입니다. ``strategy_candle_anchor``는
     업비트가 해당 전략 봉을 시작한 시각이므로, 단순히 자정 기준으로 묶어 실제
     거래소의 봉 경계가 달라지는 문제를 막습니다.
+
+    Args:
+        source_ohlcv: 현재 실행 시점까지 완료된 짧은 원본 봉 데이터입니다.
+        strategy_interval: 이 원본 봉을 묶어 만들 RSI 전략 봉 간격입니다.
+        strategy_candle_anchor: 업비트가 실제 전략 봉을 시작한 시각입니다.
+
+    Returns:
+        전략 봉 경계를 맞춰 합친 ``open``·``close`` OHLCV 데이터입니다.
     """
 
     strategy_duration = pd.Timedelta(interval_to_timedelta(strategy_interval))
@@ -95,7 +124,17 @@ def build_strategy_ohlcv(
 
 
 def _infer_source_candle_duration(ohlcv: pd.DataFrame) -> pd.Timedelta:
-    """원본 OHLCV 인덱스에서 한 캔들이 나타내는 시간을 추정합니다."""
+    """원본 OHLCV 인덱스에서 한 캔들이 나타내는 시간을 추정합니다.
+
+    Args:
+        ohlcv: 시간순 ``DatetimeIndex``를 가진 원본 봉 데이터입니다.
+
+    Returns:
+        인접한 원본 봉 시작 시각 사이의 최소 시간 간격입니다.
+
+    Raises:
+        ValueError: 시각 인덱스가 증가하지 않거나 봉이 하나뿐일 때 발생합니다.
+    """
 
     intervals = ohlcv.index.to_series().diff().dropna()
     if intervals.empty or (intervals <= pd.Timedelta(0)).any():
@@ -104,14 +143,30 @@ def _infer_source_candle_duration(ohlcv: pd.DataFrame) -> pd.Timedelta:
 
 
 def _is_scheduled_execution_time(timestamp: pd.Timestamp, cron_duration: pd.Timedelta) -> bool:
-    """자정 기준 크론 주기에 맞는 실행 시점인지 반환합니다."""
+    """자정 기준 크론 주기에 맞는 실행 시점인지 반환합니다.
+
+    Args:
+        timestamp: 원본 봉이 종료되어 시뮬레이터가 판단할 수 있는 시각입니다.
+        cron_duration: 백테스트에서 가정한 봇 실행 주기입니다.
+
+    Returns:
+        해당 시각이 자정 기준 크론 실행 시점이면 ``True``입니다.
+    """
 
     elapsed_today = timestamp - timestamp.normalize()
     return elapsed_today % cron_duration == pd.Timedelta(0)
 
 
 def validate_ohlcv(ohlcv: pd.DataFrame, config: V3Config = V3_CONFIG) -> None:
-    """원본 OHLCV와 백테스트 크론 가정이 함께 유효한지 확인합니다."""
+    """원본 OHLCV와 백테스트 크론 가정이 함께 유효한지 확인합니다.
+
+    Args:
+        ohlcv: ``open``·``close`` 컬럼과 시간순 ``DatetimeIndex``를 가진 원본 봉 데이터입니다.
+        config: 전략 간격과 백테스트 자금·수수료·크론 가정을 담은 V3 전체 설정입니다.
+
+    Raises:
+        ValueError: 입력 컬럼, 시각 순서, 체결 가정, 크론 간격이 유효하지 않을 때 발생합니다.
+    """
 
     required_columns = {"open", "close"}
     missing_columns = required_columns - set(ohlcv.columns)
@@ -152,6 +207,18 @@ def run_backtest(
     않도록 다음 원본 캔들의 시가에 체결된다고 가정합니다. 외부 API 호출이나 파일
     저장은 하지 않습니다. 실제 업비트 백테스트에서는 ``strategy_candle_anchor``에
     업비트 전략 봉의 시작 시각을 넘겨야 합니다.
+
+    Args:
+        ohlcv: 크론 실행 시점보다 같거나 짧은 간격의 시간순 원본 OHLCV 데이터입니다.
+        config: 티커·전략·백테스트 체결 가정을 가진 V3 설정입니다.
+        strategy_candle_anchor: 업비트가 현재 전략 봉을 시작한 시각입니다. 거래소의
+            실제 전략 봉 경계에 맞춰 원본 봉을 합치기 위해 필요합니다.
+
+    Returns:
+        RSI, 자산 곡선, 체결 기록, 판단 시각을 담은 백테스트 결과입니다.
+
+    Raises:
+        ValueError: OHLCV·백테스트 설정이 유효하지 않거나 전략 봉 기준 시각이 없을 때 발생합니다.
     """
 
     validate_ohlcv(ohlcv, config)
