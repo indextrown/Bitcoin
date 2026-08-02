@@ -21,7 +21,17 @@ from develop.v3.backtesting.backtest_logic import (  # noqa: E402
     run_backtest,
     select_source_interval,
 )
-from develop.v3.config import V3_CONFIG, V3Config  # noqa: E402
+from develop.v3.backtesting.ohlcv_cache import (  # noqa: E402
+    DEFAULT_CACHE_DIR,
+    OhlcvRange,
+    find_uncovered_ranges,
+    get_cached_strategy_anchor,
+    get_or_fetch_cached_ohlcv,
+    load_coverage_ranges,
+    load_cached_ohlcv,
+    save_strategy_anchor,
+)
+from develop.v3.config import V3_CONFIG, V3Config, interval_to_timedelta  # noqa: E402
 
 
 def plot_backtest(
@@ -246,44 +256,89 @@ def main() -> None:
         ),
     )
     source_interval = select_source_interval(runtime_config.backtest.cron_interval_minutes)
+    source_duration = pd.Timedelta(interval_to_timedelta(source_interval))
+    now = pd.Timestamp.now()
+    cached_ohlcv = load_cached_ohlcv(DEFAULT_CACHE_DIR, runtime_config.ticker, source_interval)
+    requested_end = simulation_end or now
+    if requested_end >= now:
+        if cached_ohlcv.empty:
+            current_source_candle = get_ohlcv(
+                runtime_config.ticker,
+                interval=source_interval,
+                count=1,
+            )
+            requested_end = current_source_candle.index[-1]
+        else:
+            cache_anchor = cached_ohlcv.index[0]
+            requested_end = cache_anchor + (now - cache_anchor).floor(source_duration)
+
+    if simulation_start is not None and requested_end <= simulation_start:
+        raise SystemExit("Invalid backtest period: no completed source candles exist after --from.")
+
     if simulation_start is None:
         source_count = calculate_source_count(runtime_config.interval, source_interval, args.count)
-        ohlcv = get_ohlcv(runtime_config.ticker, interval=source_interval, count=source_count)
     else:
-        request_end = simulation_end or pd.Timestamp.now()
         source_count = calculate_period_source_count(
             simulation_start,
-            request_end,
+            requested_end,
             source_interval,
             runtime_config.interval,
             runtime_config.strategy.rsi_period,
         )
-        ohlcv = get_ohlcv(
-            runtime_config.ticker,
-            interval=source_interval,
-            count=source_count,
-            to=simulation_end,
-        )
-        if simulation_end is not None:
-            ohlcv = ohlcv.loc[ohlcv.index < simulation_end]
 
-    strategy_ohlcv = get_ohlcv(
+    requested_start = requested_end - source_duration * source_count
+    requested_range = OhlcvRange(requested_start, requested_end)
+    cached_coverage_ranges = load_coverage_ranges(
+        DEFAULT_CACHE_DIR,
         runtime_config.ticker,
-        interval=runtime_config.interval,
-        count=1,
-        to=simulation_end,
+        source_interval,
+        cached_ohlcv,
+        source_duration,
     )
-    strategy_candle_anchor = strategy_ohlcv.index[-1]
+    cache_miss_ranges = find_uncovered_ranges(cached_coverage_ranges, requested_range)
+    ohlcv = get_or_fetch_cached_ohlcv(
+        runtime_config.ticker,
+        source_interval,
+        requested_range,
+        source_duration,
+        lambda ticker, interval, count, to: get_ohlcv(ticker, interval=interval, count=count, to=to),
+    )
+
+    strategy_candle_anchor = get_cached_strategy_anchor(
+        DEFAULT_CACHE_DIR,
+        runtime_config.ticker,
+        source_interval,
+        runtime_config.interval,
+    )
+    if strategy_candle_anchor is None:
+        strategy_ohlcv = get_ohlcv(
+            runtime_config.ticker,
+            interval=runtime_config.interval,
+            count=1,
+            to=requested_end,
+        )
+        strategy_candle_anchor = strategy_ohlcv.index[-1]
+        save_strategy_anchor(
+            DEFAULT_CACHE_DIR,
+            runtime_config.ticker,
+            source_interval,
+            runtime_config.interval,
+            strategy_candle_anchor,
+        )
+
+    result_end = min(simulation_end, requested_end) if simulation_end is not None else None
     result = run_backtest(
         ohlcv,
         runtime_config,
         strategy_candle_anchor,
         simulation_start,
-        simulation_end,
+        result_end,
     )
     plot_backtest(result, args.output, runtime_config)
     print(f"output: {args.output}")
     print(f"source interval: {source_interval}")
+    print(f"cache: {DEFAULT_CACHE_DIR}")
+    print(f"cache API ranges: {len(cache_miss_ranges)}")
     if simulation_start is not None:
         period_end_label = (simulation_end - pd.Timedelta(days=1)).strftime("%Y-%m-%d") if simulation_end else "latest"
         print(f"period: {simulation_start:%Y-%m-%d} ~ {period_end_label}")

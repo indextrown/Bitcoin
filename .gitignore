@@ -4,6 +4,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+develop/v3/backtesting/cache/
 develop/v2/.v2_cron_state.json
 develop/v0/asset_log.csv
 develop/v0/log.txt

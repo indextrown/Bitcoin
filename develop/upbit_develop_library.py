@@ -469,7 +469,7 @@ def get_ohlcv(
         ticker: ``KRW-BTC`` 같은 마켓 티커입니다.
         interval: ``day``, ``minute60`` 같은 캔들 간격입니다.
         count: 가져올 캔들 개수입니다.
-        to: 조회할 마지막 시각의 배타적 경계입니다. ``None``이면 최신 데이터까지
+        to: KST 기준 조회 마지막 시각의 배타적 경계입니다. ``None``이면 최신 데이터까지
             조회하고, 날짜·시각을 넣으면 그 시각보다 앞선 데이터만 가져옵니다.
 
     Returns:
@@ -479,10 +479,47 @@ def get_ohlcv(
         ValueError: 차트 데이터를 가져오지 못했을 때 발생합니다.
     """
 
-    df = _load_pyupbit().get_ohlcv(ticker, interval=interval, count=count, to=to)
-    if df is None or df.empty:
+    def to_upbit_utc(kst_boundary: str | pd.Timestamp | None) -> pd.Timestamp | None:
+        """KST 기준 배타적 경계를 pyupbit가 해석하는 UTC 시각으로 변환합니다."""
+
+        if kst_boundary is None:
+            return None
+        kst_to = pd.Timestamp(kst_boundary)
+        if kst_to.tzinfo is not None:
+            kst_to = kst_to.tz_convert("Asia/Seoul").tz_localize(None)
+        # pyupbit는 ``to``를 UTC로 해석하지만 반환 인덱스는 KST이므로, 호출자에게는
+        # 반환 인덱스와 같은 KST 기준 시각을 받도록 맞춥니다.
+        return kst_to - pd.Timedelta(hours=9)
+
+    remaining_count = max(count, 1)
+    cursor = to
+    frames: list[pd.DataFrame] = []
+    upbit = _load_pyupbit()
+    while remaining_count > 0:
+        request_count = min(remaining_count, 200)
+        frame = upbit.get_ohlcv(
+            ticker,
+            interval=interval,
+            count=request_count,
+            to=to_upbit_utc(cursor),
+        )
+        if frame is None or frame.empty:
+            break
+
+        frames.append(frame)
+        remaining_count -= len(frame)
+        if remaining_count <= 0 or len(frame) < request_count:
+            break
+
+        # 다음 요청은 이번 응답의 가장 이른 KST 봉 바로 앞에서 끝내므로, API 페이지
+        # 경계에서도 같은 봉을 중복하거나 중간 봉을 건너뛰지 않습니다.
+        cursor = frame.index[0]
+        time.sleep(0.1)
+
+    if not frames:
         raise ValueError(f"Failed to fetch OHLCV data for {ticker} ({interval}).")
-    return df
+    df = pd.concat(frames).sort_index()
+    return df.loc[~df.index.duplicated(keep="last")]
 
 
 def get_top_coin_list(
