@@ -5,6 +5,13 @@
 __pycache__/
 *.pyc
 develop/v3/backtesting/cache/
+develop/v4/asset_log.csv
+develop/v4/trade_log.txt
+develop/v4_1/asset_log.csv
+develop/v4_1/trade_log.txt
+develop/v4_1/trade_state.json
+develop/v5/trade_log.txt
+develop/v5/trade_state.json
 develop/v2/.v2_cron_state.json
 develop/v0/asset_log.csv
 develop/v0/log.txt
