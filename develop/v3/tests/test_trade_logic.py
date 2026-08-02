@@ -4,11 +4,17 @@ from develop.v3.trade_logic import TradeConfig, decide_trade
 
 
 class TradeLogicTest(unittest.TestCase):
+    """외부 API 없이 V3 순수 매매 판단 규칙을 검증합니다."""
+
     def setUp(self) -> None:
+        """각 테스트에 사용할 기본 매매 기준을 준비합니다."""
+
         self.config = TradeConfig()
 
     # RSI가 매수 기준 이하고, 매수 비율을 적용한 금액이 최소 주문금액 이상이면 매수한다.
     def test_buys_when_rsi_is_oversold_and_minimum_order_is_met(self) -> None:
+        """과매도와 최소 주문금액 조건을 동시에 만족할 때 매수하는지 확인합니다."""
+
         decision = decide_trade(
             rsi=30.0,
             krw_balance=25_000.0,
@@ -23,6 +29,8 @@ class TradeLogicTest(unittest.TestCase):
 
     # RSI가 낮아도 매수 비율을 적용한 금액이 최소 주문금액보다 작으면 주문하지 않는다.
     def test_waits_when_buy_ratio_is_below_minimum_order(self) -> None:
+        """계산된 매수 금액이 최소 주문금액보다 작으면 대기하는지 확인합니다."""
+
         decision = decide_trade(
             rsi=25.0,
             krw_balance=24_999.0,
@@ -36,6 +44,8 @@ class TradeLogicTest(unittest.TestCase):
 
     # RSI가 매도 기준 이상이고 본전 또는 손실이면 보유 수량 전체를 매도한다.
     def test_sells_all_at_break_even_or_loss_when_rsi_is_overbought(self) -> None:
+        """과매수 구간의 본전 또는 손실 보유분을 전량 매도하는지 확인합니다."""
+
         decision = decide_trade(
             rsi=70.0,
             krw_balance=0.0,
@@ -51,6 +61,8 @@ class TradeLogicTest(unittest.TestCase):
 
     # RSI가 매도 기준 이상이고 목표 수익률 5%에 도달하면 보유 수량 전체를 익절 매도한다.
     def test_sells_all_when_profit_target_is_met(self) -> None:
+        """과매수와 목표 수익률을 만족할 때 익절 매도하는지 확인합니다."""
+
         decision = decide_trade(
             rsi=75.0,
             krw_balance=0.0,
@@ -66,6 +78,8 @@ class TradeLogicTest(unittest.TestCase):
 
     # RSI가 높아도 수익률이 본전 초과·목표 수익률 미만이면 보유 상태를 유지한다.
     def test_waits_for_profit_between_break_even_and_target(self) -> None:
+        """목표 수익률 전의 수익 구간에서는 보유를 유지하는지 확인합니다."""
+
         decision = decide_trade(
             rsi=75.0,
             krw_balance=0.0,

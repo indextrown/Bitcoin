@@ -1,13 +1,9 @@
-"""V3 trade_logic을 과거 캔들에 적용해 백테스트 그래프를 만드는 도구입니다.
-
-신호는 캔들이 마감된 시점의 RSI로 판단하고, 주문은 다음 캔들의 시가에 체결된다고
-가정합니다. 따라서 현재 캔들의 종가를 미리 안 것처럼 계산하는 오류를 피합니다.
-"""
+"""V3 백테스트 결과를 조회하고 PNG 그래프로 저장하는 실행 도구입니다."""
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 import sys
 
@@ -17,144 +13,23 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from develop.upbit_develop_library import calculate_rsi_series, get_ohlcv  # noqa: E402
-from develop.v3.trade_logic import TradeConfig, decide_trade  # noqa: E402
-
-
-@dataclass(frozen=True)
-class BacktestTrade:
-    action: str
-    signal_time: pd.Timestamp
-    execution_time: pd.Timestamp
-    execution_price: float
-    order_amount: float
-    profit_rate: float
-
-
-@dataclass(frozen=True)
-class BacktestResult:
-    initial_capital: float
-    final_equity: float
-    total_return_pct: float
-    rsi: pd.Series
-    equity_curve: pd.Series
-    trades: list[BacktestTrade]
-
-
-def validate_ohlcv(ohlcv: pd.DataFrame) -> None:
-    """백테스트에 필요한 OHLCV 컬럼과 최소 데이터 수를 확인합니다."""
-
-    required_columns = {"open", "close"}
-    missing_columns = required_columns - set(ohlcv.columns)
-    if missing_columns:
-        missing = ", ".join(sorted(missing_columns))
-        raise ValueError(f"OHLCV data is missing required columns: {missing}")
-    if len(ohlcv) < 16:
-        raise ValueError("At least 16 OHLCV rows are required for RSI(14) backtesting.")
-
-
-def run_backtest(
-    ohlcv: pd.DataFrame,
-    initial_capital: float = 1_000_000.0,
-    fee_rate: float = 0.0005,
-    config: TradeConfig = TradeConfig(),
-) -> BacktestResult:
-    """V3 판단 로직을 과거 데이터에 적용해 가상 자산과 체결 기록을 반환합니다."""
-
-    validate_ohlcv(ohlcv)
-    if initial_capital <= 0:
-        raise ValueError("initial_capital must be greater than zero.")
-    if not 0 <= fee_rate < 1:
-        raise ValueError("fee_rate must be between 0 (inclusive) and 1 (exclusive).")
-
-    prices = ohlcv.copy()
-    rsi = calculate_rsi_series(prices, period=14)
-    cash = initial_capital
-    coin_amount = 0.0
-    avg_buy_price = 0.0
-    trades: list[BacktestTrade] = []
-    equity_values: list[float] = []
-
-    for position, (signal_time, candle) in enumerate(prices.iterrows()):
-        current_price = float(candle["close"])
-        equity_values.append(cash + coin_amount * current_price)
-
-        if position >= len(prices) - 1:
-            continue
-
-        rsi_value = float(rsi.iloc[position])
-        if pd.isna(rsi_value):
-            continue
-
-        decision = decide_trade(
-            rsi_value,
-            cash,
-            coin_amount,
-            avg_buy_price,
-            current_price,
-            config,
-        )
-        if decision.action == "WAIT":
-            continue
-
-        execution_candle = prices.iloc[position + 1]
-        execution_time = prices.index[position + 1]
-        execution_price = float(execution_candle["open"])
-        if execution_price <= 0:
-            continue
-
-        if decision.action == "BUY":
-            order_amount = min(decision.order_amount, cash)
-            bought_amount = order_amount * (1 - fee_rate) / execution_price
-            if bought_amount <= 0:
-                continue
-
-            total_cost = avg_buy_price * coin_amount + order_amount
-            cash -= order_amount
-            coin_amount += bought_amount
-            avg_buy_price = total_cost / coin_amount
-        else:
-            order_amount = min(decision.order_amount, coin_amount)
-            if order_amount <= 0:
-                continue
-
-            cash += order_amount * execution_price * (1 - fee_rate)
-            coin_amount -= order_amount
-            if coin_amount <= 0:
-                coin_amount = 0.0
-                avg_buy_price = 0.0
-
-        trades.append(
-            BacktestTrade(
-                action=decision.action,
-                signal_time=signal_time,
-                execution_time=execution_time,
-                execution_price=execution_price,
-                order_amount=order_amount,
-                profit_rate=decision.profit_rate,
-            )
-        )
-
-    equity_curve = pd.Series(equity_values, index=prices.index, name="equity")
-    final_equity = float(equity_curve.iloc[-1])
-    total_return_pct = (final_equity / initial_capital - 1) * 100
-    return BacktestResult(
-        initial_capital=initial_capital,
-        final_equity=final_equity,
-        total_return_pct=total_return_pct,
-        rsi=rsi,
-        equity_curve=equity_curve,
-        trades=trades,
-    )
+from develop.upbit_develop_library import get_ohlcv  # noqa: E402
+from develop.v3.backtesting.backtest_logic import (  # noqa: E402
+    BacktestResult,
+    calculate_source_count,
+    run_backtest,
+    select_source_interval,
+)
+from develop.v3.config import V3_CONFIG, V3Config  # noqa: E402
 
 
 def plot_backtest(
     ohlcv: pd.DataFrame,
     result: BacktestResult,
     output_path: Path,
-    config: TradeConfig = TradeConfig(),
+    config: V3Config = V3_CONFIG,
 ) -> None:
-    """가격·RSI·자산 곡선과 V3 거래 지점을 한 PNG 파일로 저장합니다."""
+    """가격·RSI·자산 곡선과 설정값을 한 PNG 파일로 저장합니다."""
 
     import matplotlib.pyplot as plt
 
@@ -166,8 +41,28 @@ def plot_backtest(
         sharex=True,
         height_ratios=[2, 1, 1],
     )
+    figure.suptitle(
+        " | ".join(
+            [
+                config.ticker,
+                config.interval,
+                f"RSI({config.strategy.rsi_period})",
+                f"buy ≤ {config.strategy.trade.buy_threshold:g}",
+                f"sell ≥ {config.strategy.trade.sell_threshold:g}",
+                f"take profit ≥ {config.strategy.trade.sell_profit_pct:g}%",
+                f"fee {config.backtest.fee_rate * 100:.02f}%",
+                f"cron assumption {config.backtest.cron_interval_minutes}m",
+            ]
+        )
+    )
 
-    price_axis.plot(ohlcv.index, ohlcv["close"], label="close", color="black", linewidth=1)
+    price_axis.plot(
+        result.equity_curve.index,
+        ohlcv["close"],
+        label="close",
+        color="black",
+        linewidth=1,
+    )
     marker_config = {
         "BUY": ("^", "tab:blue", "buy"),
         "SELL_LOSS": ("v", "tab:red", "sell at break-even/loss"),
@@ -187,13 +82,28 @@ def plot_backtest(
             zorder=3,
         )
     price_axis.set_ylabel("Price (KRW)")
-    price_axis.set_title("V3 trade logic backtest")
+    price_axis.set_title("Price and simulated trade executions")
     price_axis.legend(loc="best")
     price_axis.grid(alpha=0.25)
 
-    rsi_axis.plot(result.rsi.index, result.rsi, label="RSI(14)", color="tab:purple")
-    rsi_axis.axhline(config.buy_threshold, color="tab:blue", linestyle="--", label="buy threshold")
-    rsi_axis.axhline(config.sell_threshold, color="tab:red", linestyle="--", label="sell threshold")
+    rsi_axis.plot(
+        result.rsi.index,
+        result.rsi,
+        label=f"RSI({config.strategy.rsi_period})",
+        color="tab:purple",
+    )
+    rsi_axis.axhline(
+        config.strategy.trade.buy_threshold,
+        color="tab:blue",
+        linestyle="--",
+        label="buy threshold",
+    )
+    rsi_axis.axhline(
+        config.strategy.trade.sell_threshold,
+        color="tab:red",
+        linestyle="--",
+        label="sell threshold",
+    )
     rsi_axis.set_ylabel("RSI")
     rsi_axis.set_ylim(0, 100)
     rsi_axis.legend(loc="best")
@@ -205,18 +115,26 @@ def plot_backtest(
     equity_axis.legend(loc="best")
     equity_axis.grid(alpha=0.25)
 
-    figure.tight_layout()
+    figure.tight_layout(rect=(0, 0, 1, 0.96))
     figure.savefig(output_path, dpi=150)
     plt.close(figure)
 
 
 def parse_args() -> argparse.Namespace:
+    """공용 V3 설정을 기본값으로 사용하는 시각화 실행 인자를 읽습니다."""
+
     parser = argparse.ArgumentParser(description="Visualize V3 trade logic on historical OHLCV data.")
-    parser.add_argument("--ticker", default="KRW-ETH")
-    parser.add_argument("--interval", default="minute240")
+    parser.add_argument("--ticker", default=V3_CONFIG.ticker)
+    parser.add_argument("--interval", default=V3_CONFIG.interval)
     parser.add_argument("--count", type=int, default=200)
-    parser.add_argument("--initial-capital", type=float, default=1_000_000.0)
-    parser.add_argument("--fee-rate", type=float, default=0.0005)
+    parser.add_argument("--initial-capital", type=float, default=V3_CONFIG.backtest.initial_capital)
+    parser.add_argument("--fee-rate", type=float, default=V3_CONFIG.backtest.fee_rate)
+    parser.add_argument(
+        "--cron-interval-minutes",
+        type=int,
+        default=V3_CONFIG.backtest.cron_interval_minutes,
+        help="백테스트에서 가정할 crontab 실행 간격(분)",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -226,11 +144,31 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """과거 OHLCV를 조회하고 V3 백테스트 PNG와 요약 결과를 생성합니다."""
+
     args = parse_args()
-    ohlcv = get_ohlcv(args.ticker, interval=args.interval, count=args.count)
-    result = run_backtest(ohlcv, args.initial_capital, args.fee_rate)
-    plot_backtest(ohlcv, result, args.output)
+    runtime_config = replace(
+        V3_CONFIG,
+        ticker=args.ticker,
+        interval=args.interval,
+        backtest=replace(
+            V3_CONFIG.backtest,
+            initial_capital=args.initial_capital,
+            fee_rate=args.fee_rate,
+            cron_interval_minutes=args.cron_interval_minutes,
+        ),
+    )
+    source_interval = select_source_interval(runtime_config.backtest.cron_interval_minutes)
+    source_count = calculate_source_count(runtime_config.interval, source_interval, args.count)
+    ohlcv = get_ohlcv(runtime_config.ticker, interval=source_interval, count=source_count)
+    strategy_ohlcv = get_ohlcv(runtime_config.ticker, interval=runtime_config.interval, count=1)
+    strategy_candle_anchor = strategy_ohlcv.index[-1]
+    result = run_backtest(ohlcv, runtime_config, strategy_candle_anchor)
+    plot_backtest(ohlcv, result, args.output, runtime_config)
     print(f"output: {args.output}")
+    print(f"source interval: {source_interval}")
+    print(f"cron assumption: every {runtime_config.backtest.cron_interval_minutes} minutes")
+    print(f"strategy candle anchor: {strategy_candle_anchor}")
     print(f"trades: {len(result.trades)}")
     print(f"final equity: {result.final_equity:,.0f} KRW")
     print(f"total return: {result.total_return_pct:.2f}%")

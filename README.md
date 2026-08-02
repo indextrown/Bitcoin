@@ -103,9 +103,14 @@ python backtesting/backtest_v1_v2.py --ticker KRW-BTC --day-count 180 --signal-c
 ```bash
 # 가격 차트의 매수·매도 지점, RSI, 자산 곡선을 PNG로 저장
 python3 develop/v3/backtesting/backtest_visualizer.py --ticker KRW-ETH --interval minute240 --count 200
+
+# 30분마다 봇이 실행됐다고 가정해 비교 (기본값도 30분)
+python3 develop/v3/backtesting/backtest_visualizer.py --cron-interval-minutes 30
 ```
 
-- 신호는 캔들 마감 RSI로 판단하고, 주문은 다음 캔들의 시가에 체결된다고 가정합니다.
+- 공용 V3 설정은 `develop/v3/config.py`에서 변경합니다. 봇, 백테스트, PNG 표시값이 같은 설정을 사용합니다.
+- `BacktestConfig.cron_interval_minutes`는 백테스트 전용 실행 주기 가정입니다. 실제 봇의 주기는 crontab에서 정하며, `btc_bot.py`는 이 값을 사용하지 않습니다.
+- 백테스트는 크론 주기에 맞는 더 짧은 원본 봉과 업비트 전략 봉의 실제 시작 시각을 사용합니다. 각 원본 봉이 끝난 시점에 전략 봉을 재구성하고, 그 순간의 다음 원본 봉 시가에 체결된다고 가정합니다.
 - 기본 시작 자금은 1,000,000원이며, 수수료 가정은 주문당 0.05%입니다.
 
 ## V2 시각화

@@ -1,0 +1,254 @@
+"""V3 전략을 과거 OHLCV 데이터에 적용하는 순수 백테스트 로직입니다."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from math import ceil
+
+import pandas as pd
+
+from develop.v3.config import V3_CONFIG, V3Config, interval_to_timedelta
+from develop.v3.trade_logic import build_signal, decide_trade
+
+
+@dataclass(frozen=True)
+class BacktestTrade:
+    """원본 봉 종료 시점의 다음 원본 봉 시가 체결을 기록한 주문입니다."""
+
+    action: str
+    signal_time: pd.Timestamp
+    execution_time: pd.Timestamp
+    execution_price: float
+    order_amount: float
+    profit_rate: float
+
+
+@dataclass(frozen=True)
+class BacktestResult:
+    """순수 백테스트가 반환하는 거래 기록, RSI, 자산 변화 결과입니다."""
+
+    initial_capital: float
+    final_equity: float
+    total_return_pct: float
+    rsi: pd.Series
+    equity_curve: pd.Series
+    trades: list[BacktestTrade]
+    evaluation_times: list[pd.Timestamp]
+
+
+def select_source_interval(cron_interval_minutes: int) -> str:
+    """크론 가정을 재현할 수 있는 가장 긴 업비트 원본 캔들 간격을 고릅니다.
+
+    예를 들어 30분 크론은 ``minute30`` 원본을, 90분 크론은 ``minute30`` 원본을
+    사용합니다. 원본 간격은 크론 주기를 정확히 나눌 수 있어야 각 실행 시점을
+    미래 데이터 없이 재현할 수 있습니다.
+    """
+
+    if cron_interval_minutes <= 0:
+        raise ValueError("cron_interval_minutes must be greater than zero.")
+
+    for minutes in (240, 60, 30, 15, 10, 5, 3, 1):
+        if cron_interval_minutes % minutes == 0:
+            return f"minute{minutes}"
+    raise AssertionError("minute1 must divide every positive integer.")
+
+
+def calculate_source_count(
+    strategy_interval: str,
+    source_interval: str,
+    strategy_candle_count: int,
+) -> int:
+    """전략 봉 개수만큼의 기간을 덮는 원본 캔들 조회 개수를 계산합니다."""
+
+    if strategy_candle_count <= 0:
+        raise ValueError("strategy_candle_count must be greater than zero.")
+
+    strategy_duration = interval_to_timedelta(strategy_interval)
+    source_duration = interval_to_timedelta(source_interval)
+    if source_duration > strategy_duration:
+        raise ValueError("source_interval must not be longer than strategy_interval.")
+
+    return ceil(strategy_duration / source_duration) * strategy_candle_count + 1
+
+
+def build_strategy_ohlcv(
+    source_ohlcv: pd.DataFrame,
+    strategy_interval: str,
+    strategy_candle_anchor: pd.Timestamp,
+) -> pd.DataFrame:
+    """실행 시점까지의 짧은 봉을 전략 봉으로 묶어 RSI 입력 데이터를 만듭니다.
+
+    마지막 전략 봉은 아직 진행 중인 부분 봉일 수 있습니다. 이는 크론으로 실행된
+    실제 봇이 해당 시점에 ``pyupbit.get_ohlcv(..., interval=전략봉)``로 보는 값과
+    같은 종류의 스냅샷을 만들기 위한 처리입니다. ``strategy_candle_anchor``는
+    업비트가 해당 전략 봉을 시작한 시각이므로, 단순히 자정 기준으로 묶어 실제
+    거래소의 봉 경계가 달라지는 문제를 막습니다.
+    """
+
+    strategy_duration = pd.Timedelta(interval_to_timedelta(strategy_interval))
+    anchor = pd.Timestamp(strategy_candle_anchor)
+    bucket_start = (source_ohlcv.index - anchor).floor(strategy_duration) + anchor
+    return source_ohlcv.groupby(bucket_start, sort=True).agg(
+        open=("open", "first"),
+        close=("close", "last"),
+    )
+
+
+def _infer_source_candle_duration(ohlcv: pd.DataFrame) -> pd.Timedelta:
+    """원본 OHLCV 인덱스에서 한 캔들이 나타내는 시간을 추정합니다."""
+
+    intervals = ohlcv.index.to_series().diff().dropna()
+    if intervals.empty or (intervals <= pd.Timedelta(0)).any():
+        raise ValueError("OHLCV index must contain increasing candle timestamps.")
+    return pd.Timedelta(intervals.min())
+
+
+def _is_scheduled_execution_time(timestamp: pd.Timestamp, cron_duration: pd.Timedelta) -> bool:
+    """자정 기준 크론 주기에 맞는 실행 시점인지 반환합니다."""
+
+    elapsed_today = timestamp - timestamp.normalize()
+    return elapsed_today % cron_duration == pd.Timedelta(0)
+
+
+def validate_ohlcv(ohlcv: pd.DataFrame, config: V3Config = V3_CONFIG) -> None:
+    """원본 OHLCV와 백테스트 크론 가정이 함께 유효한지 확인합니다."""
+
+    required_columns = {"open", "close"}
+    missing_columns = required_columns - set(ohlcv.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise ValueError(f"OHLCV data is missing required columns: {missing}")
+
+    if not isinstance(ohlcv.index, pd.DatetimeIndex):
+        raise ValueError("OHLCV index must be a DatetimeIndex.")
+    if not ohlcv.index.is_monotonic_increasing or not ohlcv.index.is_unique:
+        raise ValueError("OHLCV index must be unique and sorted in ascending order.")
+    if len(ohlcv) < 2:
+        raise ValueError("At least two OHLCV rows are required for backtesting.")
+    if config.backtest.initial_capital <= 0:
+        raise ValueError("initial_capital must be greater than zero.")
+    if not 0 <= config.backtest.fee_rate < 1:
+        raise ValueError("fee_rate must be between 0 (inclusive) and 1 (exclusive).")
+    if config.backtest.cron_interval_minutes <= 0:
+        raise ValueError("cron_interval_minutes must be greater than zero.")
+
+    source_duration = _infer_source_candle_duration(ohlcv)
+    cron_duration = pd.Timedelta(minutes=config.backtest.cron_interval_minutes)
+    if source_duration > cron_duration or cron_duration % source_duration != pd.Timedelta(0):
+        raise ValueError(
+            "OHLCV source candles must be no longer than and evenly divide the cron interval."
+        )
+
+
+def run_backtest(
+    ohlcv: pd.DataFrame,
+    config: V3Config = V3_CONFIG,
+    strategy_candle_anchor: pd.Timestamp | None = None,
+) -> BacktestResult:
+    """OHLCV와 V3 설정만으로 크론 실행을 가정한 체결·자산 변화를 계산합니다.
+
+    원본 OHLCV의 크론 실행 시점마다 진행 중인 전략 봉을 만들어 같은
+    ``build_signal``·``decide_trade`` 로직을 실행합니다. 주문은 미래 정보를 쓰지
+    않도록 다음 원본 캔들의 시가에 체결된다고 가정합니다. 외부 API 호출이나 파일
+    저장은 하지 않습니다. 실제 업비트 백테스트에서는 ``strategy_candle_anchor``에
+    업비트 전략 봉의 시작 시각을 넘겨야 합니다.
+    """
+
+    validate_ohlcv(ohlcv, config)
+    if strategy_candle_anchor is None:
+        raise ValueError("strategy_candle_anchor is required for backtesting.")
+
+    prices = ohlcv.copy()
+    source_candle_duration = _infer_source_candle_duration(prices)
+    event_times = prices.index + source_candle_duration
+    rsi = pd.Series(index=event_times, dtype=float, name="RSI")
+    cash = config.backtest.initial_capital
+    coin_amount = 0.0
+    avg_buy_price = 0.0
+    trades: list[BacktestTrade] = []
+    equity_values: list[float] = []
+    evaluation_times: list[pd.Timestamp] = []
+    cron_duration = pd.Timedelta(minutes=config.backtest.cron_interval_minutes)
+
+    for position, (source_candle_start, candle) in enumerate(prices.iterrows()):
+        signal_time = source_candle_start + source_candle_duration
+        current_price = float(candle["close"])
+        equity_values.append(cash + coin_amount * current_price)
+
+        strategy_ohlcv = build_strategy_ohlcv(
+            prices.iloc[: position + 1],
+            config.interval,
+            strategy_candle_anchor,
+        )
+        if len(strategy_ohlcv) < config.strategy.rsi_period + 2:
+            continue
+        signal = build_signal(strategy_ohlcv, config.strategy)
+        rsi.iloc[position] = signal.rsi
+
+        if position >= len(prices) - 1:
+            continue
+        if not _is_scheduled_execution_time(signal_time, cron_duration):
+            continue
+
+        evaluation_times.append(signal_time)
+        decision = decide_trade(
+            signal.rsi,
+            cash,
+            coin_amount,
+            avg_buy_price,
+            signal.price,
+            config.strategy.trade,
+        )
+        if decision.action == "WAIT":
+            continue
+
+        execution_candle = prices.iloc[position + 1]
+        execution_time = signal_time
+        execution_price = float(execution_candle["open"])
+        if execution_price <= 0:
+            continue
+
+        if decision.action == "BUY":
+            order_amount = min(decision.order_amount, cash)
+            bought_amount = order_amount * (1 - config.backtest.fee_rate) / execution_price
+            if bought_amount <= 0:
+                continue
+
+            total_cost = avg_buy_price * coin_amount + order_amount
+            cash -= order_amount
+            coin_amount += bought_amount
+            avg_buy_price = total_cost / coin_amount
+        else:
+            order_amount = min(decision.order_amount, coin_amount)
+            if order_amount <= 0:
+                continue
+
+            cash += order_amount * execution_price * (1 - config.backtest.fee_rate)
+            coin_amount -= order_amount
+            if coin_amount <= 0:
+                coin_amount = 0.0
+                avg_buy_price = 0.0
+
+        trades.append(
+            BacktestTrade(
+                action=decision.action,
+                signal_time=signal_time,
+                execution_time=execution_time,
+                execution_price=execution_price,
+                order_amount=order_amount,
+                profit_rate=decision.profit_rate,
+            )
+        )
+
+    equity_curve = pd.Series(equity_values, index=event_times, name="equity")
+    final_equity = float(equity_curve.iloc[-1])
+    total_return_pct = (final_equity / config.backtest.initial_capital - 1) * 100
+    return BacktestResult(
+        initial_capital=config.backtest.initial_capital,
+        final_equity=final_equity,
+        total_return_pct=total_return_pct,
+        rsi=rsi,
+        equity_curve=equity_curve,
+        trades=trades,
+        evaluation_times=evaluation_times,
+    )
