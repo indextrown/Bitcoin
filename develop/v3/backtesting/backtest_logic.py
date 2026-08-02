@@ -30,6 +30,7 @@ class BacktestResult:
     initial_capital: float  # 시작 원화 자산입니다.
     final_equity: float  # 마지막 원본 봉 종료 시점의 원화 환산 총자산입니다.
     total_return_pct: float  # 시작 자산 대비 최종 수익률(%)입니다.
+    close_prices: pd.Series  # 표시 기간의 원본 봉 종가 시계열입니다.
     rsi: pd.Series  # 각 원본 봉 종료 시점에 계산한 RSI 시계열입니다.
     equity_curve: pd.Series  # 각 원본 봉 종료 시점의 원화 환산 총자산 시계열입니다.
     trades: list[BacktestTrade]  # 시뮬레이션에서 실제로 체결된 주문 기록입니다.
@@ -90,6 +91,41 @@ def calculate_source_count(
         raise ValueError("source_interval must not be longer than strategy_interval.")
 
     return ceil(strategy_duration / source_duration) * strategy_candle_count + 1
+
+
+def calculate_period_source_count(
+    start_time: pd.Timestamp,
+    end_time: pd.Timestamp,
+    source_interval: str,
+    strategy_interval: str,
+    rsi_period: int,
+) -> int:
+    """날짜 지정 백테스트에 필요한 원본 봉 수와 RSI 준비 구간을 계산합니다.
+
+    Args:
+        start_time: 그래프·가상 자산 계산을 시작할 포함 시각입니다.
+        end_time: 그래프·가상 자산 계산을 끝낼 배타적 시각입니다.
+        source_interval: 크론 실행 시점 재현에 사용하는 짧은 업비트 캔들 간격입니다.
+        strategy_interval: RSI 전략이 사용하는 긴 업비트 캔들 간격입니다.
+        rsi_period: RSI 계산에 필요한 전략 봉 수입니다.
+
+    Returns:
+        지정 기간과 RSI 준비 구간을 함께 포함하도록 조회할 원본 봉 개수입니다.
+
+    Raises:
+        ValueError: 기간 순서나 RSI 기간이 유효하지 않을 때 발생합니다.
+    """
+
+    if end_time <= start_time:
+        raise ValueError("end_time must be later than start_time.")
+    if rsi_period < 1:
+        raise ValueError("rsi_period must be greater than zero.")
+
+    source_duration = pd.Timedelta(interval_to_timedelta(source_interval))
+    strategy_duration = pd.Timedelta(interval_to_timedelta(strategy_interval))
+    period_duration = end_time - start_time
+    warmup_duration = strategy_duration * (rsi_period + 2)
+    return ceil((period_duration + warmup_duration) / source_duration) + 1
 
 
 def build_strategy_ohlcv(
@@ -199,6 +235,8 @@ def run_backtest(
     ohlcv: pd.DataFrame,
     config: V3Config = V3_CONFIG,
     strategy_candle_anchor: pd.Timestamp | None = None,
+    simulation_start: pd.Timestamp | None = None,
+    simulation_end: pd.Timestamp | None = None,
 ) -> BacktestResult:
     """OHLCV와 V3 설정만으로 크론 실행을 가정한 체결·자산 변화를 계산합니다.
 
@@ -213,6 +251,10 @@ def run_backtest(
         config: 티커·전략·백테스트 체결 가정을 가진 V3 설정입니다.
         strategy_candle_anchor: 업비트가 현재 전략 봉을 시작한 시각입니다. 거래소의
             실제 전략 봉 경계에 맞춰 원본 봉을 합치기 위해 필요합니다.
+        simulation_start: 시작 자산을 적용하고 그래프에 표시할 포함 시각입니다. 이보다
+            이전 데이터는 RSI 준비에만 사용하며 가상 주문은 실행하지 않습니다.
+        simulation_end: 그래프에 표시할 배타적 종료 시각입니다. ``None``이면 원본
+            데이터의 마지막까지 사용합니다.
 
     Returns:
         RSI, 자산 곡선, 체결 기록, 판단 시각을 담은 백테스트 결과입니다.
@@ -224,10 +266,17 @@ def run_backtest(
     validate_ohlcv(ohlcv, config)
     if strategy_candle_anchor is None:
         raise ValueError("strategy_candle_anchor is required for backtesting.")
+    if simulation_start is not None:
+        simulation_start = pd.Timestamp(simulation_start)
+    if simulation_end is not None:
+        simulation_end = pd.Timestamp(simulation_end)
+    if simulation_start is not None and simulation_end is not None and simulation_end <= simulation_start:
+        raise ValueError("simulation_end must be later than simulation_start.")
 
     prices = ohlcv.copy()
     source_candle_duration = _infer_source_candle_duration(prices)
     event_times = prices.index + source_candle_duration
+    close_prices = pd.Series(prices["close"].to_numpy(), index=event_times, name="close")
     rsi = pd.Series(index=event_times, dtype=float, name="RSI")
     cash = config.backtest.initial_capital
     coin_amount = 0.0
@@ -253,6 +302,10 @@ def run_backtest(
         rsi.iloc[position] = signal.rsi
 
         if position >= len(prices) - 1:
+            continue
+        if simulation_start is not None and signal_time < simulation_start:
+            continue
+        if simulation_end is not None and signal_time >= simulation_end:
             continue
         if not _is_scheduled_execution_time(signal_time, cron_duration):
             continue
@@ -307,13 +360,24 @@ def run_backtest(
             )
         )
 
-    equity_curve = pd.Series(equity_values, index=event_times, name="equity")
+    visible_mask = pd.Series(True, index=event_times)
+    if simulation_start is not None:
+        visible_mask &= event_times >= simulation_start
+    if simulation_end is not None:
+        visible_mask &= event_times < simulation_end
+    if not visible_mask.any():
+        raise ValueError("No completed source candles exist in the requested simulation period.")
+
+    close_prices = close_prices.loc[visible_mask]
+    rsi = rsi.loc[visible_mask]
+    equity_curve = pd.Series(equity_values, index=event_times, name="equity").loc[visible_mask]
     final_equity = float(equity_curve.iloc[-1])
     total_return_pct = (final_equity / config.backtest.initial_capital - 1) * 100
     return BacktestResult(
         initial_capital=config.backtest.initial_capital,
         final_equity=final_equity,
         total_return_pct=total_return_pct,
+        close_prices=close_prices,
         rsi=rsi,
         equity_curve=equity_curve,
         trades=trades,

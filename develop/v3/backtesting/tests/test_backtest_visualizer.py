@@ -5,9 +5,11 @@ import pandas as pd
 
 from develop.v3.backtesting.backtest_logic import (
     build_strategy_ohlcv,
+    calculate_period_source_count,
     run_backtest,
     validate_ohlcv,
 )
+from develop.v3.backtesting.backtest_visualizer import parse_backtest_period
 from develop.v3.config import V3_CONFIG
 
 
@@ -151,3 +153,44 @@ class V3BacktestVisualizerTest(unittest.TestCase):
             [pd.Timestamp("2025-01-01 09:00:00"), pd.Timestamp("2025-01-01 13:00:00")],
         )
         self.assertEqual(float(strategy_ohlcv.loc["2025-01-01 13:00:00", "open"]), 101.0)
+
+    # 시작 전 데이터는 RSI 준비에만 쓰고, 자산·거래 결과는 지정한 기간부터 보여 준다.
+    def test_run_backtest_limits_results_to_requested_period(self) -> None:
+        """지정 기간의 첫 자산이 시작 자금이고 이전 시각의 거래를 제외하는지 확인합니다."""
+
+        simulation_start = pd.Timestamp("2025-01-04 00:00:00")
+        simulation_end = pd.Timestamp("2025-01-05 00:00:00")
+        result = run_backtest(
+            self.make_ohlcv([200.0 - index for index in range(30)]),
+            self.make_coarse_candle_config(),
+            self.strategy_candle_anchor(),
+            simulation_start,
+            simulation_end,
+        )
+
+        self.assertEqual(result.equity_curve.index[0], simulation_start)
+        self.assertEqual(result.equity_curve.iloc[0], result.initial_capital)
+        self.assertTrue(all(simulation_start <= trade.signal_time < simulation_end for trade in result.trades))
+
+    # 날짜 지정 조회에는 기간과 RSI(14) 준비 봉을 모두 포함한 원본 봉 수가 필요하다.
+    def test_calculate_period_source_count_adds_rsi_warmup(self) -> None:
+        """하루 구간에 4시간 RSI(14) 준비 구간을 더한 30분 원본 봉 수를 계산하는지 확인합니다."""
+
+        source_count = calculate_period_source_count(
+            pd.Timestamp("2025-01-01 00:00:00"),
+            pd.Timestamp("2025-01-02 00:00:00"),
+            "minute30",
+            "minute240",
+            14,
+        )
+
+        self.assertEqual(source_count, 177)
+
+    # --to는 종료일 전체를 포함하기 위해 내부적으로 다음 날 00:00의 배타적 경계가 된다.
+    def test_parse_backtest_period_includes_end_date(self) -> None:
+        """시작일과 종료일이 각각 포함 시작·배타적 종료 시각으로 변환되는지 확인합니다."""
+
+        start_time, end_time = parse_backtest_period("2025-01-01", "2025-01-31")
+
+        self.assertEqual(start_time, pd.Timestamp("2025-01-01 00:00:00"))
+        self.assertEqual(end_time, pd.Timestamp("2025-02-01 00:00:00"))

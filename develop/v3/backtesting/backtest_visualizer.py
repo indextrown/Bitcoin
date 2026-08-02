@@ -16,6 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 from develop.upbit_develop_library import get_ohlcv  # noqa: E402
 from develop.v3.backtesting.backtest_logic import (  # noqa: E402
     BacktestResult,
+    calculate_period_source_count,
     calculate_source_count,
     run_backtest,
     select_source_interval,
@@ -24,7 +25,6 @@ from develop.v3.config import V3_CONFIG, V3Config  # noqa: E402
 
 
 def plot_backtest(
-    ohlcv: pd.DataFrame,
     result: BacktestResult,
     output_path: Path,
     config: V3Config = V3_CONFIG,
@@ -32,8 +32,7 @@ def plot_backtest(
     """가격·RSI·자산 곡선과 설정값을 한 PNG 파일로 저장합니다.
 
     Args:
-        ohlcv: 크론 재현에 사용한 원본 OHLCV 데이터입니다. 가격 선을 그릴 때 사용합니다.
-        result: 순수 백테스트가 계산한 RSI, 자산 곡선, 체결 기록입니다.
+        result: 순수 백테스트가 계산한 가격, RSI, 자산 곡선, 체결 기록입니다.
         output_path: 생성할 PNG 파일의 전체 또는 상대 경로입니다.
         config: 제목·RSI 기준선·수수료 표시에 사용할 V3 설정입니다.
     """
@@ -59,13 +58,14 @@ def plot_backtest(
                 f"take profit ≥ {config.strategy.trade.sell_profit_pct:g}%",
                 f"fee {config.backtest.fee_rate * 100:.02f}%",
                 f"cron assumption {config.backtest.cron_interval_minutes}m",
+                f"period {result.close_prices.index[0]:%Y-%m-%d} ~ {result.close_prices.index[-1]:%Y-%m-%d}",
             ]
         )
     )
 
     price_axis.plot(
-        result.equity_curve.index,
-        ohlcv["close"],
+        result.close_prices.index,
+        result.close_prices,
         label="close",
         color="black",
         linewidth=1,
@@ -127,17 +127,73 @@ def plot_backtest(
     plt.close(figure)
 
 
+def parse_backtest_period(
+    start_date: str | None,
+    end_date: str | None,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """날짜 문자열을 백테스트의 시작 시각과 배타적 종료 시각으로 변환합니다.
+
+    Args:
+        start_date: 포함할 시작 날짜입니다. ``YYYY-MM-DD`` 형식이며, ``None``이면
+            기존 ``--count`` 방식으로 최근 데이터를 조회합니다.
+        end_date: 포함할 마지막 날짜입니다. ``YYYY-MM-DD`` 형식이며, ``None``이면
+            최신 데이터까지 조회합니다.
+
+    Returns:
+        시작일 00:00과 종료일 다음 날 00:00으로 구성된 ``(start, end_exclusive)``
+        튜플입니다. 시작일이 없으면 ``(None, None)``을 반환합니다.
+
+    Raises:
+        ValueError: 날짜 형식이 잘못됐거나 종료일이 시작일보다 빠를 때 발생합니다.
+    """
+
+    if start_date is None:
+        if end_date is not None:
+            raise ValueError("--to requires --from.")
+        return None, None
+
+    try:
+        start_time = pd.Timestamp(start_date)
+        end_day = pd.Timestamp(end_date) if end_date is not None else None
+    except (TypeError, ValueError) as error:
+        raise ValueError("--from and --to must use YYYY-MM-DD format.") from error
+
+    if start_time != start_time.normalize() or (end_day is not None and end_day != end_day.normalize()):
+        raise ValueError("--from and --to must use YYYY-MM-DD format.")
+
+    start_time = start_time.normalize()
+    end_time = end_day.normalize() + pd.Timedelta(days=1) if end_day is not None else None
+    if end_time is not None and end_time <= start_time:
+        raise ValueError("--to must be the same date as or later than --from.")
+    return start_time, end_time
+
+
 def parse_args() -> argparse.Namespace:
     """공용 V3 설정을 기본값으로 사용하는 시각화 실행 인자를 읽습니다.
 
     Returns:
-        티커, 전략 봉, 조회 개수, 자금, 수수료, 크론 가정, PNG 경로를 담은 인자입니다.
+        티커, 전략 봉, 조회 개수, 기간, 자금, 수수료, 크론 가정, PNG 경로를 담은 인자입니다.
     """
 
     parser = argparse.ArgumentParser(description="Visualize V3 trade logic on historical OHLCV data.")
     parser.add_argument("--ticker", default=V3_CONFIG.ticker, help="분석할 업비트 마켓 티커입니다.")
     parser.add_argument("--interval", default=V3_CONFIG.interval, help="RSI 전략이 사용할 업비트 캔들 간격입니다.")
-    parser.add_argument("--count", type=int, default=200, help="그래프에 사용할 전략 봉의 목표 개수입니다.")
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=200,
+        help="기간을 지정하지 않았을 때 그래프에 사용할 전략 봉의 목표 개수입니다.",
+    )
+    parser.add_argument(
+        "--from",
+        dest="start_date",
+        help="포함할 시작 날짜입니다. YYYY-MM-DD 형식입니다.",
+    )
+    parser.add_argument(
+        "--to",
+        dest="end_date",
+        help="포함할 마지막 날짜입니다. YYYY-MM-DD 형식이며 --from과 함께 사용합니다.",
+    )
     parser.add_argument(
         "--initial-capital",
         type=float,
@@ -174,6 +230,10 @@ def main() -> None:
     """
 
     args = parse_args()
+    try:
+        simulation_start, simulation_end = parse_backtest_period(args.start_date, args.end_date)
+    except ValueError as error:
+        raise SystemExit(f"Invalid backtest period: {error}") from error
     runtime_config = replace(
         V3_CONFIG,
         ticker=args.ticker,
@@ -186,14 +246,47 @@ def main() -> None:
         ),
     )
     source_interval = select_source_interval(runtime_config.backtest.cron_interval_minutes)
-    source_count = calculate_source_count(runtime_config.interval, source_interval, args.count)
-    ohlcv = get_ohlcv(runtime_config.ticker, interval=source_interval, count=source_count)
-    strategy_ohlcv = get_ohlcv(runtime_config.ticker, interval=runtime_config.interval, count=1)
+    if simulation_start is None:
+        source_count = calculate_source_count(runtime_config.interval, source_interval, args.count)
+        ohlcv = get_ohlcv(runtime_config.ticker, interval=source_interval, count=source_count)
+    else:
+        request_end = simulation_end or pd.Timestamp.now()
+        source_count = calculate_period_source_count(
+            simulation_start,
+            request_end,
+            source_interval,
+            runtime_config.interval,
+            runtime_config.strategy.rsi_period,
+        )
+        ohlcv = get_ohlcv(
+            runtime_config.ticker,
+            interval=source_interval,
+            count=source_count,
+            to=simulation_end,
+        )
+        if simulation_end is not None:
+            ohlcv = ohlcv.loc[ohlcv.index < simulation_end]
+
+    strategy_ohlcv = get_ohlcv(
+        runtime_config.ticker,
+        interval=runtime_config.interval,
+        count=1,
+        to=simulation_end,
+    )
     strategy_candle_anchor = strategy_ohlcv.index[-1]
-    result = run_backtest(ohlcv, runtime_config, strategy_candle_anchor)
-    plot_backtest(ohlcv, result, args.output, runtime_config)
+    result = run_backtest(
+        ohlcv,
+        runtime_config,
+        strategy_candle_anchor,
+        simulation_start,
+        simulation_end,
+    )
+    plot_backtest(result, args.output, runtime_config)
     print(f"output: {args.output}")
     print(f"source interval: {source_interval}")
+    if simulation_start is not None:
+        period_end_label = (simulation_end - pd.Timedelta(days=1)).strftime("%Y-%m-%d") if simulation_end else "latest"
+        print(f"period: {simulation_start:%Y-%m-%d} ~ {period_end_label}")
     print(f"cron assumption: every {runtime_config.backtest.cron_interval_minutes} minutes")
     print(f"strategy candle anchor: {strategy_candle_anchor}")
     print(f"trades: {len(result.trades)}")

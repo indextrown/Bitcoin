@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # V3 백테스트 시각화 실행: develop/v3/backtesting/v3_backtest.png를 생성합니다.
-# ``$@``: ``make backtest`` 뒤에 전달한 티커·수수료·크론 가정 등의 CLI 인자를 그대로 전달합니다.
+# ``$@``: ``--from 2026-01-01 --to 2026-06-30``처럼 직접 전달한 CLI 인자를 시각화 도구에 넘깁니다.
 set -euo pipefail
 
 REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"

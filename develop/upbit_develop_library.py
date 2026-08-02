@@ -461,6 +461,7 @@ def get_ohlcv(
     ticker: str,
     interval: str = "day",
     count: int = 200,
+    to: str | pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """특정 티커의 OHLCV 차트 데이터를 반환합니다.
 
@@ -468,6 +469,8 @@ def get_ohlcv(
         ticker: ``KRW-BTC`` 같은 마켓 티커입니다.
         interval: ``day``, ``minute60`` 같은 캔들 간격입니다.
         count: 가져올 캔들 개수입니다.
+        to: 조회할 마지막 시각의 배타적 경계입니다. ``None``이면 최신 데이터까지
+            조회하고, 날짜·시각을 넣으면 그 시각보다 앞선 데이터만 가져옵니다.
 
     Returns:
         ``pyupbit``가 반환한 OHLCV 데이터프레임입니다.
@@ -476,7 +479,7 @@ def get_ohlcv(
         ValueError: 차트 데이터를 가져오지 못했을 때 발생합니다.
     """
 
-    df = _load_pyupbit().get_ohlcv(ticker, interval=interval, count=count)
+    df = _load_pyupbit().get_ohlcv(ticker, interval=interval, count=count, to=to)
     if df is None or df.empty:
         raise ValueError(f"Failed to fetch OHLCV data for {ticker} ({interval}).")
     return df
